@@ -19,19 +19,26 @@ if [ "$1" = "--uninstall" ]; then
     exit 0
 fi
 
+# The Python that runs this script also runs anySCP (a virtual environment's too).
+PYTHON="$(command -v python3)" || { echo "python3 not found"; exit 1; }
 missing=""
-python3 - <<'PY' || missing=1
+"$PYTHON" - <<'PY' || missing=1
 import gi
 gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 assert (Adw.get_major_version(), Adw.get_minor_version()) >= (1, 5), "libadwaita >= 1.5 required"
-import paramiko
+import cryptography, paramiko
+def version(text):
+    return tuple(int(p) for p in text.split(".")[:2])
+assert version(paramiko.__version__) >= (3, 2), f"Paramiko >= 3.2 required, this is {paramiko.__version__}"
+assert version(cryptography.__version__) >= (42, 0), f"cryptography >= 42 required, this is {cryptography.__version__}"
 PY
 if [ -n "$missing" ]; then
-    echo "Missing dependencies. On Debian/Ubuntu install them with:"
+    echo "Missing dependencies. On Debian 13 / Ubuntu 25.04 or newer install them with:"
     echo "  sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-paramiko \\"
     echo "       gir1.2-gtksource-5 gir1.2-vte-3.91 gir1.2-secret-1"
     echo "On Fedora:  sudo dnf install python3-gobject gtk4 libadwaita python3-paramiko gtksourceview5 vte291-gtk4 libsecret"
+    echo "Older Paramiko or cryptography (Ubuntu 24.04): see \"Requirements\" in README.md."
     exit 1
 fi
 
@@ -44,7 +51,7 @@ find "$LIBDIR" -name __pycache__ -type d -prune -exec rm -rf {} +
 cat > "$PREFIX/bin/anyscp" <<SH
 #!/bin/sh
 export PYTHONPATH="$LIBDIR\${PYTHONPATH:+:\$PYTHONPATH}"
-exec python3 -m anyscp "\$@"
+exec "$PYTHON" -m anyscp "\$@"
 SH
 chmod +x "$PREFIX/bin/anyscp"
 
