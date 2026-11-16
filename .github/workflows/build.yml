@@ -25,46 +25,57 @@ jobs:
     timeout-minutes: 150
     env:
       ANYSCP_CI: "1"
+      # What packaging/setup-build-deps.sh makes (all but conda's package cache).
+      DEPS: |
+        build/tools
+        build/appimage/env
+        build/appimage/env-aarch64
+        build/appimage/buildenv-aarch64
+        build/appimage/extras-aarch64
+        build/appimage/extras-src
+        build/windows/env
+        build/windows/env-arm64
+        build/msys2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Make room on the disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
 
-      - name: arm64 emulation (for the arm64 libraries built in a container)
-        uses: docker/setup-qemu-action@v3
+      # Setting these up takes almost half an hour (the arm64 libraries are
+      # compiled under emulation): reuse them until the setup changes.  They
+      # are saved as soon as they are ready, whatever happens afterwards.
+      - name: Restore the build dependencies
+        id: deps
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: build-deps-v2-${{ hashFiles('packaging/setup-build-deps.sh', 'packaging/appimage/arm64-extras.env', 'packaging/appimage/build-arm64-extras.sh', 'packaging/appimage/conda_pins.py', 'packaging/windows/msys2-packages.txt', 'packaging/windows/msys2_fetch.py') }}
+
+      - name: arm64 emulation (to build the arm64 libraries in a container)
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
-
-      # The runtimes, tools and the arm64 libraries take a while to download
-      # and build: reuse them until the setup changes.
-      - name: Cache the build dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            build/tools
-            build/mamba/pkgs
-            build/appimage/env
-            build/appimage/env-aarch64
-            build/appimage/buildenv-aarch64
-            build/appimage/extras-aarch64
-            build/appimage/extras-src
-            build/windows/env
-            build/windows/env-arm64
-            build/msys2
-          key: build-deps-v1-${{ hashFiles('packaging/setup-build-deps.sh', 'packaging/appimage/arm64-extras.env', 'packaging/appimage/build-arm64-extras.sh', 'packaging/appimage/conda_pins.py', 'packaging/windows/msys2-packages.txt', 'packaging/windows/msys2_fetch.py') }}
 
       - name: Set up the build dependencies
         run: ./packaging/setup-build-deps.sh
 
+      - name: Save the build dependencies
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.DEPS }}
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+
       - name: Backend tests
         run: |
-          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-glib-2.0 python3-paramiko \
-              python3-cryptography python3-venv openssh-server
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-glib-2.0 python3-venv openssh-server
           python3 -m venv --system-site-packages .venv
-          .venv/bin/pip install -q pytest pyftpdlib pyopenssl wsgidav cheroot
+          # (Ubuntu 24.04's own paramiko and cryptography are older than anySCP needs)
+          .venv/bin/pip install -q pytest pyftpdlib pyopenssl wsgidav cheroot "paramiko>=3.4,<4" "cryptography>=42"
           .venv/bin/python -m pytest -q
 
       - name: AppImages (x86-64, arm64)
@@ -82,7 +93,7 @@ jobs:
           cd dist
           sha256sum * | tee SHA256SUMS.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: anySCP-${{ github.sha }}
           path: dist/*
