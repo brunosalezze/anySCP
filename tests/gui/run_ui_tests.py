@@ -291,6 +291,25 @@ def windows(package: Path, display, sshd, args):
     share.stop_wine(display)
 
 
+def signed_copy(exe: Path, folder: Path) -> Path | None:
+    """A copy of exe with an Authenticode signature (a throwaway self-signed
+    certificate), made with osslsigncode; None without osslsigncode."""
+    tool = shutil.which("osslsigncode") or os.environ.get("OSSLSIGNCODE")
+    if not tool:
+        log("   (osslsigncode not found: the signed exe is not tested)")
+        return None
+    share.rmtree(folder)
+    folder.mkdir(parents=True)
+    key, cert = folder / "test.key", folder / "test.crt"
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:3072", "-sha256", "-days", "2", "-nodes",
+                    "-subj", "/CN=anySCP test signature", "-addext", "extendedKeyUsage=codeSigning",
+                    "-keyout", str(key), "-out", str(cert)], check=True, capture_output=True)
+    out = folder / f"{exe.stem}-signed{exe.suffix}"
+    subprocess.run([tool, "sign", "-certs", str(cert), "-key", str(key), "-h", "sha256", "-n", "anySCP",
+                    "-in", str(exe), "-out", str(out)], check=True, capture_output=True)
+    return out
+
+
 def selftest(label, exe: Path, display, d):
     logf = d["out"] / f"selftest-{exe.stem}.log"
     env = share.wine_env(display, {"ANYSCP_LOG_FILE": share.to_wine_z(logf)})
@@ -351,6 +370,11 @@ def main():
                     shutil.copy(exe, d["out"] / exe.name)
                     selftest(exe.stem, d["out"] / exe.name, x.display, d)
                     share.stop_wine(x.display)
+                    # and signed: the launcher finds its runtime before the signature
+                    signed = signed_copy(exe, BUILD / "selftest" / f"{exe.stem}-signed")
+                    if signed is not None:
+                        selftest(f"{exe.stem} signed", signed, x.display, {"out": signed.parent})
+                        share.stop_wine(x.display)
 
     failed = [r for r in RESULTS if not r[1]]
     log(f"\n{BOLD}{len(RESULTS) - len(failed)}/{len(RESULTS)} passed{END}"

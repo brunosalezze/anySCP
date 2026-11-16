@@ -12,6 +12,10 @@
  *        uint64 payload offset | 16 ASCII chars build id | "ANYSCPZ1"
  *    On first start it is extracted to %LOCALAPPDATA%\anySCP\runtime-<id>
  *    (atomically, so an interrupted extraction is simply redone).
+ *    A code signature (Authenticode) comes after all that: Windows keeps it
+ *    last in the file, 8-byte aligned, where the PE header's security
+ *    directory says; the trailer is then just before it.  (The signature
+ *    covers the appended runtime too.)
  *
  * Two runtime layouts are understood:
  *
@@ -182,22 +186,56 @@ static void progress_close(void)
 
 /* ------------------------------------------------------------------ payload */
 
+/* Where the data appended to the exe ends: at the code signature's
+   certificate table if the exe is signed, else at the end of the file. */
+static int64_t appended_data_end(FILE *f, int64_t file_size)
+{
+    unsigned char h[4096];
+    if (_fseeki64(f, 0, SEEK_SET) != 0)
+        return file_size;
+    size_t n = fread(h, 1, sizeof h, f);
+    if (n < 0x40 || h[0] != 'M' || h[1] != 'Z')
+        return file_size;
+    uint32_t pe;
+    memcpy(&pe, h + 0x3C, 4);
+    if ((uint64_t)pe + 26 > n || memcmp(h + pe, "PE\0\0", 4) != 0)
+        return file_size;
+    uint16_t magic;
+    memcpy(&magic, h + pe + 24, 2);
+    size_t opt = pe + 24, dirs = opt + (magic == 0x20B ? 112 : 96);
+    uint32_t count, cert_at, cert_size;
+    memcpy(&count, h + dirs - 4, 4);                  /* NumberOfRvaAndSizes */
+    if (count <= 4 || dirs + 5 * 8 > n)
+        return file_size;
+    memcpy(&cert_at, h + dirs + 4 * 8, 4);            /* IMAGE_DIRECTORY_ENTRY_SECURITY: */
+    memcpy(&cert_size, h + dirs + 4 * 8 + 4, 4);      /* a file offset, not an RVA */
+    if (cert_at == 0 || cert_size == 0 || (int64_t)cert_at + cert_size > file_size)
+        return file_size;
+    return cert_at;
+}
+
 /* Returns 1 and fills offset/size/id if this exe carries a runtime payload. */
 static int read_trailer(uint64_t *offset, uint64_t *size, char id[17])
 {
     FILE *f = _wfopen(g_exe_path, L"rb");
     if (!f)
         return 0;
-    unsigned char t[TRAILER_SIZE];
     int ok = 0;
-    if (_fseeki64(f, -(int64_t)TRAILER_SIZE, SEEK_END) == 0 && fread(t, 1, TRAILER_SIZE, f) == TRAILER_SIZE
-        && memcmp(t + 24, TRAILER_MAGIC, 8) == 0) {
-        int64_t end = _ftelli64(f);
-        memcpy(offset, t, 8);
-        memcpy(id, t + 8, 16);
-        id[16] = 0;
-        *size = (uint64_t)end - TRAILER_SIZE - *offset;
-        ok = *offset > 0 && *size > 0;
+    if (_fseeki64(f, 0, SEEK_END) == 0) {
+        int64_t end = appended_data_end(f, _ftelli64(f));
+        /* (before a signature: up to 7 bytes of alignment padding) */
+        for (int pad = 0; pad < 8 && !ok; pad++) {
+            unsigned char t[TRAILER_SIZE];
+            int64_t at = end - pad - TRAILER_SIZE;
+            if (at > 0 && _fseeki64(f, at, SEEK_SET) == 0 && fread(t, 1, TRAILER_SIZE, f) == TRAILER_SIZE
+                && memcmp(t + 24, TRAILER_MAGIC, 8) == 0) {
+                memcpy(offset, t, 8);
+                memcpy(id, t + 8, 16);
+                id[16] = 0;
+                *size = (uint64_t)at - *offset;
+                ok = *offset > 0 && *size > 0;
+            }
+        }
     }
     fclose(f);
     return ok;
