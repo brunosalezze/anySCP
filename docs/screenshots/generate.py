@@ -372,6 +372,8 @@ def in_app():
         app.transfers.cancel(big)
         spin(lambda: not app.transfers.active, 20)
         app.transfers.remove(big)
+        win.queue_btn.set_active(False)                 # the list closes: just the transfer bar
+        wait(0.5)
 
         win.edit_site(by_name["Nextcloud"])
         wait(0.8)

@@ -201,6 +201,10 @@ columnview.file-list > listview > row.drop-target {
   padding: 3px 6px 3px 12px;
 }
 
+.queue-bar:hover {
+  background: alpha(currentColor, 0.04);
+}
+
 .queue-empty {
   padding: 2px 12px 10px 12px;
 }

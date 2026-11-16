@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 
-from gi.repository import Adw, GLib, Graphene, Gsk, Gtk, Pango
+from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk, Pango
 
 from ..compat import shortcut_label
 from ..transfer import CANCELLED, DONE, FAILED, QUEUED, RUNNING
@@ -133,7 +133,13 @@ class JobRow(Gtk.ListBoxRow):
 
 
 class QueuePanel(Gtk.Box):
-    """The queue: a title line and one line per transfer, newest first."""
+    """The transfers, along the bottom of the window: a bar that is always
+    there, with a summary, and below it the list of transfers (newest first),
+    which opens and closes when the bar is clicked."""
+
+    __gtype_name__ = "AnyscpQueuePanel"
+
+    expanded = GObject.Property(type=bool, default=False)
 
     def __init__(self, manager):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -142,8 +148,9 @@ class QueuePanel(Gtk.Box):
         self.rows: dict[int, JobRow] = {}
         self._timer = 0
 
-        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.bar = bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         bar.add_css_class("queue-bar")
+        bar.set_cursor_from_name("pointer")
         title = Gtk.Label(label="Transfers", xalign=0)
         title.add_css_class("heading")
         bar.append(title)
@@ -155,26 +162,51 @@ class QueuePanel(Gtk.Box):
         self.clear_btn.add_css_class("flat")
         self.clear_btn.connect("clicked", lambda *_a: manager.clear_finished())
         bar.append(self.clear_btn)
-        self.close_btn = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=shortcut_label("Hide (Ctrl+J)"))
-        self.close_btn.add_css_class("flat")
-        bar.append(self.close_btn)          # the window connects it
+        self.expand_btn = Gtk.Button()
+        self.expand_btn.add_css_class("flat")
+        self.expand_btn.connect("clicked", lambda *_a: self.toggle())
+        bar.append(self.expand_btn)
+        # A click anywhere on the bar opens or closes the list (the buttons on
+        # it take their own clicks).
+        click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
+        click.connect("released", lambda *_a: self.toggle())
+        bar.add_controller(click)
         self.append(bar)
 
         self.empty = Gtk.Label(label="No transfers. Drag files between the panes, or select files and press F5.",
                                xalign=0, ellipsize=Pango.EllipsizeMode.END)
         self.empty.add_css_class("queue-empty")
         self.empty.add_css_class("dim-label")
-        self.append(self.empty)
-
         self.listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.listbox.add_css_class("queue-list")
         self.scroller = Gtk.ScrolledWindow(child=self.listbox, hscrollbar_policy=Gtk.PolicyType.NEVER,
                                            propagate_natural_height=True,
                                            max_content_height=MAX_LIST_HEIGHT)
-        self.append(self.scroller)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        body.append(self.empty)
+        body.append(self.scroller)
+        self.revealer = Gtk.Revealer(child=body, transition_type=Gtk.RevealerTransitionType.SLIDE_UP,
+                                     transition_duration=150)
+        self.bind_property("expanded", self.revealer, "reveal-child", GObject.BindingFlags.SYNC_CREATE)
+        self.connect("notify::expanded", lambda *_a: self._expanded_changed())
+        self.append(self.revealer)
 
         manager.connect("changed", lambda *_a: self.sync_rows())
         self.sync_rows()
+        self._expanded_changed()
+
+    def toggle(self):
+        self.props.expanded = not self.props.expanded
+
+    def _expanded_changed(self):
+        if self.props.expanded:
+            self.expand_btn.set_icon_name("pan-down-symbolic")
+            self.expand_btn.set_tooltip_text(shortcut_label("Close the list of transfers (Ctrl+J)"))
+            self.add_css_class("expanded")
+        else:
+            self.expand_btn.set_icon_name("pan-up-symbolic")
+            self.expand_btn.set_tooltip_text(shortcut_label("Show the transfers (Ctrl+J)"))
+            self.remove_css_class("expanded")
 
     def sync_rows(self):
         current = {job.id: job for job in self.manager.jobs}

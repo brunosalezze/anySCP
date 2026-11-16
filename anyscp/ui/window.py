@@ -21,7 +21,7 @@ from .session_page import SessionPage
 from .site_dialog import PROTOCOL_ICONS, SiteDialog
 from .welcome import WelcomePage
 
-QUEUE_HIDE_DELAY_MS = 2000      # the queue closes this long after its last transfer finished
+QUEUE_COLLAPSE_DELAY_MS = 2000  # the list of transfers closes this long after the last one finished
 
 PAGE_ACTIONS = {
     # name: accelerators
@@ -63,17 +63,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_size_request(640, 420)
 
         self.toasts = Adw.ToastOverlay()
-        # The transfer queue is a bottom bar over the full width of the
-        # window, as in WinSCP.  It opens when a transfer starts and closes
-        # by itself shortly after the last one has finished.
+        # The transfers are a bar over the full width of the bottom of the
+        # window, as in WinSCP.  The bar is always there; the list of
+        # transfers below it opens when a transfer starts and closes by itself
+        # shortly after the last one has finished (and on a click on the bar).
         view = Adw.ToolbarView(top_bar_style=Adw.ToolbarStyle.RAISED,
-                               bottom_bar_style=Adw.ToolbarStyle.RAISED_BORDER,
-                               reveal_bottom_bars=False)
+                               bottom_bar_style=Adw.ToolbarStyle.RAISED_BORDER)
         self.queue_panel = QueuePanel(self.transfers)
         view.add_bottom_bar(self.queue_panel)
         self._queue_busy = False            # transfers are queued or running
         self._queue_busy_since = 0.0
-        self._queue_autohide = False        # close the queue once it has drained
+        self._queue_autohide = False        # close the list once the queue has drained
         self._queue_hide_timer = 0
         header = Adw.HeaderBar()
         self.window_title = Adw.WindowTitle(title="anySCP")
@@ -86,10 +86,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.queue_btn = Gtk.ToggleButton(tooltip_text=compat.shortcut_label("Transfers (Ctrl+J)"))
         self.queue_btn.add_css_class("image-button")
         self.queue_btn.set_child(ProgressIcon(self.transfers))
-        self.queue_btn.bind_property("active", view, "reveal-bottom-bars",
+        self.queue_btn.bind_property("active", self.queue_panel, "expanded",
                                      GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE)
         self.queue_btn.connect("notify::active", self._on_queue_toggled)
-        self.queue_panel.close_btn.connect("clicked", lambda *_a: self.queue_btn.set_active(False))
         header.pack_end(self._main_menu_button())
         header.pack_end(self.queue_btn)
         self.session_menu_btn = Gtk.MenuButton(icon_name="view-more-symbolic", tooltip_text="Session",
@@ -530,7 +529,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._queue_hide_timer = 0
 
     def _on_transfers_changed(self, *_a):
-        """Close the queue QUEUE_HIDE_DELAY_MS after its last transfer finished."""
+        """Close the list QUEUE_COLLAPSE_DELAY_MS after the last transfer finished."""
         if self.transfers.active:
             if not self._queue_busy:
                 self._queue_busy = True
@@ -546,7 +545,7 @@ class MainWindow(Adw.ApplicationWindow):
         if any(j.state == FAILED and (j.finished_at or 0) >= self._queue_busy_since
                for j in self.transfers.jobs):
             return                          # keep the error and its Retry button in view
-        self._queue_hide_timer = GLib.timeout_add(QUEUE_HIDE_DELAY_MS, self._hide_drained_queue)
+        self._queue_hide_timer = GLib.timeout_add(QUEUE_COLLAPSE_DELAY_MS, self._hide_drained_queue)
 
     def _hide_drained_queue(self):
         self._queue_hide_timer = 0

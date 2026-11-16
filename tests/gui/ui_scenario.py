@@ -57,7 +57,7 @@ from anyscp.transfer import AutoDecider  # noqa: E402
 from anyscp.ui import dragout  # noqa: E402
 from anyscp.ui.file_pane import FilePane  # noqa: E402
 from anyscp.ui.site_dialog import AUTH_MODES, SiteDialog  # noqa: E402
-from anyscp.ui.window import QUEUE_HIDE_DELAY_MS  # noqa: E402
+from anyscp.ui.window import QUEUE_COLLAPSE_DELAY_MS  # noqa: E402
 
 result = {"ok": False, "steps": []}
 T0 = time.monotonic()
@@ -447,10 +447,27 @@ def test_proxy_and_jump_site(app):
 
 # ---------------------------------------------------------------------------- B
 
+def queue_bar_only(win):
+    """The transfers are just their bar: one line along the bottom, full width."""
+    ok, rect = win.queue_panel.compute_bounds(win)
+    return (ok and win.queue_panel.get_mapped() and 20 < rect.size.height < 60
+            and abs(rect.origin.y + rect.size.height - win.get_height()) <= 2
+            and abs(rect.size.width - win.get_width()) <= 2)
+
+
+def click_queue_bar(win):
+    """What a click on the transfer bar does (its click gesture's release)."""
+    controllers = win.queue_panel.bar.observe_controllers()
+    gesture = next(c for c in (controllers.get_item(i) for i in range(controllers.get_n_items()))
+                   if isinstance(c, Gtk.GestureClick))
+    gesture.emit("released", 1, 20.0, 10.0)
+
+
 def test_queue(app, page):
     win, lp, rp = app.window, page.local_pane, page.remote_pane
-    delay = QUEUE_HIDE_DELAY_MS / 1000
-    step("the queue is closed while nothing is transferred", not win.queue_btn.get_active())
+    delay = QUEUE_COLLAPSE_DELAY_MS / 1000
+    step("the list of transfers is closed while nothing is transferred", not win.queue_btn.get_active())
+    step("... and the transfer bar is there all the same, along the bottom", spin(lambda: queue_bar_only(win), 3))
     # When the app learnt that a job had finished, and when the queue opened or closed
     seen_finished, toggled = {}, []
     app.transfers.connect("job-finished", lambda _m, j: seen_finished.setdefault(j.id, time.time()))
@@ -492,7 +509,15 @@ def test_queue(app, page):
          waited is not None and delay - 0.1 <= waited <= delay + 0.5 * SLOW,
          f"after {waited:.2f} s" if waited is not None else "it did not close")
     wait(0.5)
+    step("... down to its bar, which stays in view", spin(lambda: queue_bar_only(win), 3))
     screenshot(win, "queue-closed.png")
+    click_queue_bar(win)
+    step("a click on the bar shows the transfers again, the finished ones too",
+         spin(lambda: win.queue_btn.get_active() and laid_out(), 3) and job.id in win.queue_panel.rows)
+    wait(delay + 1)
+    step("... and they stay open", win.queue_btn.get_active())
+    click_queue_bar(win)
+    step("another click closes them", spin(lambda: not win.queue_btn.get_active() and queue_bar_only(win), 3))
 
     # two transfers: it closes after the second one only
     page.start_transfer(rp, [info_of(rp, "small.txt")], lp, lp.path)
@@ -530,8 +555,8 @@ def test_queue(app, page):
     wait(delay + 1.5)
     step("the queue stays open when opened by hand", win.queue_btn.get_active())
     screenshot(win, "queue-by-hand.png")
-    win.queue_panel.close_btn.emit("clicked")
-    step("its close button hides it", spin(lambda: not win.queue_btn.get_active(), 2))
+    win.queue_panel.expand_btn.emit("clicked")
+    step("its button on the bar closes it", spin(lambda: not win.queue_btn.get_active() and queue_bar_only(win), 2))
 
 
 # ---------------------------------------------------------------------------- C

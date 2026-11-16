@@ -39,7 +39,7 @@ import your saved WinSCP sites.
 - The local pane updates automatically when files change on disk
 
 **Transfers**
-- Background queue in a panel along the bottom of the window (as in WinSCP), with progress, speed, time remaining, cancel and retry. It opens when a transfer starts and closes 2 seconds after the last one has finished
+- Transfer bar along the bottom of the window (as in WinSCP), always in view with a summary. Its list of transfers (progress, speed, time remaining, cancel, retry) opens when a transfer starts and closes 2 seconds after the last one has finished; click the bar to see the finished transfers again
 - Several transfers run in parallel over extra SFTP channels on the same SSH connection, so you don't log in again
 - Recursive folder transfers that follow symlinked folders, with loop protection
 - Overwrite prompt: overwrite, skip, newer only, resume, or apply to all

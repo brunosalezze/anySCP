@@ -87,7 +87,8 @@ class PreferencesDialog(Adw.PreferencesDialog):
         tg = Adw.PreferencesGroup(title="Queue")
         tg.add(_spin("Parallel transfers", "How many queue entries run at the same time", 1, 10,
                      s, "parallel_transfers"))
-        tg.add(_switch("Show queue automatically", "Open the transfer queue at the bottom of the window when a transfer starts, "
+        tg.add(_switch("Open the transfer list automatically",
+                       "Open the list of transfers at the bottom of the window when a transfer starts, "
                        "and close it 2 seconds after the last one has finished",
                        s, "auto_show_queue"))
         transfer.add(tg)
