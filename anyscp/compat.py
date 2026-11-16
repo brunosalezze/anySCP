@@ -106,6 +106,14 @@ def home_dir() -> str:
     return to_internal(os.path.expanduser("~"))
 
 
+def tilde(path: str) -> str:
+    """A local path for display, with the home folder shown as "~"."""
+    home = home_dir().rstrip("/")
+    if home and (path == home or path.startswith(home + "/")):
+        return "~" + path[len(home):]
+    return path
+
+
 def list_drives() -> list[str]:
     """Drive roots on Windows, e.g. ``["C:", "D:"]``."""
     if not IS_WINDOWS:

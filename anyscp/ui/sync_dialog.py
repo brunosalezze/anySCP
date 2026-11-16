@@ -9,6 +9,7 @@ import threading
 
 from gi.repository import Adw, GLib, Gtk
 
+from .. import compat
 from ..backends.local import LocalFileSystem
 from ..session import LocalEndpoint, SessionEndpoint
 from ..sync import DELETE_LOCAL, DELETE_REMOTE, DOWNLOAD, UPLOAD, SyncOptions, compare
@@ -199,7 +200,7 @@ class SyncDialog(Adw.Dialog):
         if downloads:
             jobs.append(TransferJob(f"Synchronize: download {len(downloads)} item(s)", remote_ep, LocalEndpoint(),
                                     downloads, settings=page.settings, overwrite="overwrite",
-                                    direction="download", subtitle=f"to {local_root}"))
+                                    direction="download", subtitle=f"to {compat.tilde(local_root)}"))
         if del_local:
             jobs.append(DeleteJob(f"Synchronize: delete {len(del_local)} local item(s)", LocalEndpoint(),
                                   del_local, subtitle=local_root))

@@ -76,10 +76,7 @@ class SessionPage(Gtk.Box):
         if self.active_pane is not None and self.active_pane.path:
             path = self.active_pane.path
             if self.active_pane.is_local:
-                home = compat.home_dir()
-                if path == home or path.startswith(home + "/"):
-                    path = "~" + path[len(home):]
-                return f"Local: {path}"
+                return f"Local: {compat.tilde(path)}"
             return f"{site_subtitle(self.site).split(' · ')[-1]}: {path}"
         return site_subtitle(self.site)
 
@@ -593,7 +590,7 @@ class SessionPage(Gtk.Box):
         if move:
             verb = "Moving"
         what = infos[0].name if len(infos) == 1 else f"{len(infos)} items"
-        where = dst_dir if dst_pane.is_local else f"{self.title}:{dst_dir}"
+        where = compat.tilde(dst_dir) if dst_pane.is_local else f"{self.title}:{dst_dir}"
         job = TransferJob(f"{verb} {what}", self._endpoint(src_pane), self._endpoint(dst_pane), pairs,
                           move=move, settings=self.settings, direction=direction,
                           subtitle=f"to {where}")
