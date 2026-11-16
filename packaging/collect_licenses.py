@@ -247,3 +247,11 @@ Notes on specific licenses:
 print(f"    licenses: {len(rows)} components"
       + (f" ({len(missing)} without license files: {', '.join(missing[:6])}{'…' if len(missing) > 6 else ''})"
          if missing else ""))
+
+# These packages have no license file of their own (parts split off another
+# package, or public domain); every other component must have its texts.  On
+# CI a missing one fails the build, so no package ships without them unnoticed.
+NO_FILES_EXPECTED = {"libfreetype", "libfreetype6", "libsqlite", "libgcc-ng"}
+unexpected = [name for name in missing if name not in NO_FILES_EXPECTED]
+if unexpected and os.environ.get("ANYSCP_CI"):
+    sys.exit(f"ERROR: no license files found for {len(unexpected)} components: {', '.join(unexpected)}")

@@ -25,8 +25,10 @@ jobs:
     timeout-minutes: 150
     env:
       ANYSCP_CI: "1"
-      # What packaging/setup-build-deps.sh makes (all but conda's package cache).
+      # What packaging/setup-build-deps.sh makes: everything but the packages in
+      # conda's package cache, of which only the metadata (license texts) is needed.
       DEPS: |
+        build/mamba/pkgs/https/conda.anaconda.org/conda-forge/*/*/info
         build/tools
         build/appimage/env
         build/appimage/env-aarch64
@@ -52,7 +54,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.DEPS }}
-          key: build-deps-v2-${{ hashFiles('packaging/setup-build-deps.sh', 'packaging/appimage/arm64-extras.env', 'packaging/appimage/build-arm64-extras.sh', 'packaging/appimage/conda_pins.py', 'packaging/windows/msys2-packages.txt', 'packaging/windows/msys2_fetch.py') }}
+          key: build-deps-v3-${{ hashFiles('packaging/setup-build-deps.sh', 'packaging/appimage/arm64-extras.env', 'packaging/appimage/build-arm64-extras.sh', 'packaging/appimage/conda_pins.py', 'packaging/windows/msys2-packages.txt', 'packaging/windows/msys2_fetch.py') }}
 
       - name: arm64 emulation (to build the arm64 libraries in a container)
         if: steps.deps.outputs.cache-hit != 'true'
