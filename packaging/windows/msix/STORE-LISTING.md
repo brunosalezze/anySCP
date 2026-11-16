@@ -57,7 +57,9 @@ Upload both .msix files. Device family: Windows 10/11 Desktop.
 **Screenshots** (desktop, at least 1366 × 768): `docs/screenshots/commander.png`,
 `sites.png`, `sync.png`, `dark.png`, `welcome.png`.
 
-**Store logos → 1:1 app tile icon** (300 × 300): `store-logos/app-tile-icon-300x300.png`
-(the app icon; without it the Store shows the package's 50 × 50 logo, enlarged).
+**Store logos** (all made from the app icon, in `store-logos/`):
+`app-tile-icon-300x300.png` (1:1 app tile icon; without it the Store shows the package's
+50 × 50 logo, enlarged), and the tile icons `tile-71x71.png`, `tile-150x150.png`,
+`tile-wide-310x150.png`, `tile-310x310.png`.
 
 **Copyright**: © 2026 anySCP contributors. GPL-3.0-or-later.
