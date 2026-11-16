@@ -84,6 +84,35 @@ no VTE for macOS, so the terminal opens in Terminal.app). It makes
   and the backend tests. While nobody has tried it on a real Mac, the job may fail
   without failing the workflow run.
 
+## Microsoft Store (MSIX)
+
+The Store takes the Windows programs as MSIX packages, and signs them itself: installed from
+the Store, anySCP gets no SmartScreen or Smart App Control warning. The package holds the
+folder layout of a Windows build (anySCP.exe next to `runtime\`), not the single-file exe.
+
+```sh
+./packaging/windows/build.sh arm64      # (or x64)
+./packaging/windows/msix/make_layout.sh arm64 <Package/Identity/Name> "<Publisher CN=...>" "<Publisher display name>"
+```
+
+The three identity values come from Partner Center (the app's *Product identity*).
+`make_layout.sh` writes `build/msix/<arch>/layout`: the build's files, `AppxManifest.xml`
+(a full-trust desktop app, `runFullTrust`) and the logos made from the app icon. On Windows,
+`makeappx pack /d layout /p anySCP.msix` packs it; the Store wants it unsigned.
+
+`packaging/windows/msix/wack.ps1 -Layout <layout>` (as an administrator) packs the layout,
+signs it with a throwaway certificate whose subject is the manifest's Publisher, runs the
+**Windows App Certification Kit** on it and removes the certificate and the test install
+again. It installs the Windows SDK's kit and tools first if needed. The SDK installer offers
+the kit only on x86/x64 Windows; on Windows on ARM, its x64 MSIs (from
+`winsdksetup.exe /layout <dir> /features OptionId.WindowsSoftwareLogoToolkit`, folder
+`Installers`) install with `msiexec` and run emulated.
+
+First result (2026-11-16, arm64 package, kit 10.0.26100.7627): overall **PASS**; 23 of 24
+tests passed. The optional "Blocked executables" test lists every file containing strings like
+"cmd" or "reg" (Python's standard library, GTK, openssl.cnf...) and API names like
+`ShellExecuteW`: informational, not a certification failure.
+
 ## How it works
 
 **AppImage** (`appimage/`):
