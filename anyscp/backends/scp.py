@@ -22,6 +22,9 @@ from .ssh import SSHFileSystem
 q = shlex.quote
 
 FIND_FORMAT = r"%y\t%Y\t%m\t%s\t%T@\t%u\t%g\t%l\t%f\0"
+# BSD stat(1) (macOS, FreeBSD, ...): the same, with exact times, where find
+# has no -printf.  Type and permissions, size, mtime, owner, group, link, name.
+STAT_FORMAT = "%Sp%t%Lp%t%z%t%m%t%Su%t%Sg%t%Y%t%N"
 
 _LS_RE = re.compile(
     r"^(?P<perm>[\-dlcbps][rwxsStTl\-]{9})[.+@]?\s+\d+\s+(?P<owner>\S+)\s+(?P<group>\S+)\s+"
@@ -233,7 +236,8 @@ class SCPFileSystem(SSHFileSystem):
     def __init__(self, site=None, prompter=None, connection=None):
         super().__init__(site, prompter, connection)
         self._home = "/"
-        self._use_find = False
+        self._use_find = False      # GNU find -printf
+        self._use_stat = False      # BSD stat -f (else ls -la, whose times are rough)
 
     def connect(self):
         self._open_connection()
@@ -241,13 +245,17 @@ class SCPFileSystem(SSHFileSystem):
         self._home = out.strip() or "/"
         status, out, _err = self.exec("find / -maxdepth 0 -printf '%y' 2>/dev/null")
         self._use_find = status == 0 and out.strip() == "d"
-        self.prompter.log(f"SCP session started, home is {self._home}; "
-                          f"listing with {'find' if self._use_find else 'ls'}")
+        if not self._use_find:
+            status, out, _err = self.exec("stat -f '%m' / 2>/dev/null")
+            self._use_stat = status == 0 and out.strip().isdigit()
+        how = "find" if self._use_find else "stat" if self._use_stat else "ls"
+        self.prompter.log(f"SCP session started, home is {self._home}; listing with {how}")
 
     def clone(self):
         other = SCPFileSystem(self.site, self.prompter, self.conn)
         other._home = self._home
         other._use_find = self._use_find
+        other._use_stat = self._use_stat
         return other
 
     def _run(self, command: str, path: str) -> str:
@@ -289,24 +297,50 @@ class SCPFileSystem(SSHFileSystem):
                 link_target=link or None))
         return result
 
+    @staticmethod
+    def _parse_stat(out: str) -> list[FileInfo]:
+        result = []
+        for record in out.splitlines():
+            fields = record.split("\t", 7)
+            if len(fields) != 8 or not fields[0]:
+                continue
+            perms, mode, size, mtime, owner, group, link, path = fields
+            is_dir = perms[0] == "d"
+            result.append(FileInfo(
+                name=posixpath.basename(path.rstrip("/")) or "/", path=path, is_dir=is_dir,
+                is_link=perms[0] == "l", size=0 if is_dir else int(size or 0), mtime=float(mtime or 0),
+                mode=int(mode, 8) if mode else None, owner=owner, group=group, link_target=link or None))
+        return result
+
+    def _mark_linked_dirs(self, entries: list[FileInfo]) -> None:
+        """ls -l and stat report links, not targets: ask which link targets
+        are directories."""
+        links = [e for e in entries if e.is_link]
+        if not links:
+            return
+        script = "; ".join(f"[ -d {q(e.path)} ] && echo {q(e.name)}" for e in links[:200])
+        try:
+            _st, dirs_out, _err = self.exec(script)
+        except (paramiko.SSHException, OSError):
+            return
+        dir_names = set(dirs_out.splitlines())
+        for e in links:
+            if e.name in dir_names:
+                e.is_dir = True
+
     def listdir(self, path):
         if self._use_find:
             out = self._run(f"find {q(path)} -mindepth 1 -maxdepth 1 -printf {q(FIND_FORMAT)}", path)
             return self._parse_find(out, path)
-        out = self._run(f"LC_ALL=C ls -la {q(path + '/')}", path)
-        entries = [e for e in (parse_ls_line(line, path) for line in out.splitlines()) if e]
-        # ls -l reports links, not targets: ask which link targets are directories.
-        links = [e for e in entries if e.is_link]
-        if links:
-            script = "; ".join(f"[ -d {q(e.path)} ] && echo {q(e.name)}" for e in links[:200])
-            try:
-                _st, dirs_out, _err = self.exec(script)
-                dir_names = set(dirs_out.splitlines())
-                for e in links:
-                    if e.name in dir_names:
-                        e.is_dir = True
-            except (paramiko.SSHException, OSError):
-                pass
+        if self._use_stat:
+            out = self._run(f"find {q(path)} -mindepth 1 -maxdepth 1 -exec stat -f {q(STAT_FORMAT)} {{}} +", path)
+            entries = self._parse_stat(out)
+            for e in entries:                       # (find gave them as path/name)
+                e.path = posixpath.join(path, e.name)
+        else:
+            out = self._run(f"LC_ALL=C ls -la {q(path + '/')}", path)
+            entries = [e for e in (parse_ls_line(line, path) for line in out.splitlines()) if e]
+        self._mark_linked_dirs(entries)
         return entries
 
     def stat(self, path):
@@ -317,6 +351,16 @@ class SCPFileSystem(SSHFileSystem):
                 raise NotFound(f"No such file or directory: {path}")
             items[0].path = path
             return items[0]
+        if self._use_stat:
+            items = self._parse_stat(self._run(f"stat -f {q(STAT_FORMAT)} {q(path)}", path))
+            if not items:
+                raise NotFound(f"No such file or directory: {path}")
+            info = items[0]
+            info.path = path
+            info.name = posixpath.basename(path.rstrip("/")) or "/"
+            if info.is_link:
+                info.is_dir = self.exec(f"[ -d {q(path)} ] && echo d")[1].strip() == "d"
+            return info
         out = self._run(f"LC_ALL=C ls -lad {q(path)}", path)
         for line in out.splitlines():
             info = parse_ls_line(line, posixpath.dirname(path))
