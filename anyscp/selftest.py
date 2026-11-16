@@ -36,7 +36,7 @@ def _check(results, name, fn):
 
 def run_checks(app) -> dict:
     import gi
-    from gi.repository import Adw, Gtk
+    from gi.repository import Adw, Gtk, Pango
 
     from . import __version__, compat
     from .backends.local import LocalFileSystem
@@ -164,7 +164,15 @@ def run_checks(app) -> dict:
         assert font is not None, "the default font could not be loaded"
         families = len(fontmap.list_families())
         assert families > 0, "no font families"
-        return f"{font.describe().to_string()} ({families} families)"
+        # The editor and the terminal ask for "Monospace": fontconfig's
+        # aliases have to work (on Windows, Pango has its own).
+        mono = fontmap.load_font(ctx, Pango.FontDescription.from_string("Monospace 11"))
+        family = mono.get_face().get_family() if mono is not None and mono.get_face() else None
+        name = family.get_name() if family is not None else "no font"
+        if not compat.IS_WINDOWS:
+            assert family is not None and family.is_monospace(), \
+                f"Monospace is drawn with {name}, which is not a fixed-width font"
+        return f"{font.describe().to_string()}, Monospace: {name} ({families} families)"
 
     def window():
         win = app.get_active_window() or getattr(app, "window", None)

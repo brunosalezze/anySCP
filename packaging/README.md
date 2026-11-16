@@ -66,6 +66,9 @@ Re-run them after changing the app. They copy the runtime again, prune it and re
 - `AppRun` points Python, GObject-introspection, GSettings schemas, gdk-pixbuf loaders, fontconfig and the XKB/X11 data at the bundle.
 - The libraries use `$ORIGIN` RPATHs, so `LD_LIBRARY_PATH` is never set. Only glibc and the GPU drivers come from the host.
 - Fonts come from the host's fontconfig setup. On systems without one (minimal containers), bundled fonts and aliases are used instead.
+  `FONTCONFIG_PATH=/etc/fonts` matters: the host's `fonts.conf` includes `conf.d` (the `sans-serif`/`monospace` aliases)
+  by a relative path, which the bundled fontconfig would otherwise look up in its own build folder; every font name then
+  fell back to the first font installed (FreeSerif, in the editor and terminal). `--self-test` checks that `Monospace` is fixed-width.
 - On X11, `AppRun` picks GTK's OpenGL renderer unless `GSK_RENDERER` is set: GTK's Vulkan renderer cannot present on X servers without DRI3 (Xvfb, VNC, xrdp) and then quits instead of falling back. Wayland sessions keep GTK's default.
 - The arm64 image is assembled without running any arm64 code: the tools the build uses (`glib-compile-schemas`, `rsvg-convert`, the bytecode compiler) come from the x86-64 runtime, whose Python has the same version. Their output does not depend on the architecture.
 

@@ -11,7 +11,7 @@ U="$HERE/usr"
 ANYSCP_UNSET_VARS=""
 for v in PATH PYTHONHOME PYTHONPATH PYTHONNOUSERSITE PYTHONSTARTUP PYTHONSAFEPATH \
          GI_TYPELIB_PATH XDG_DATA_DIRS GSETTINGS_SCHEMA_DIR GDK_PIXBUF_MODULE_FILE \
-         GIO_MODULE_DIR GIO_EXTRA_MODULES FONTCONFIG_FILE XLOCALEDIR XKB_CONFIG_ROOT \
+         GIO_MODULE_DIR GIO_EXTRA_MODULES FONTCONFIG_FILE FONTCONFIG_PATH XLOCALEDIR XKB_CONFIG_ROOT \
          GTK_PATH GTK_EXE_PREFIX GTK_DATA_PREFIX GSETTINGS_BACKEND GSK_RENDERER; do
     if eval "[ -n \"\${$v+x}\" ]"; then
         eval "export ANYSCP_ORIG_$v=\"\$$v\""
@@ -32,6 +32,11 @@ export GSETTINGS_BACKEND=memory      # GTK's internal settings: don't write outs
 export GIO_MODULE_DIR="$U/lib/gio/modules"      # never load the host's GIO modules
 if [ -f /etc/fonts/fonts.conf ]; then
     export FONTCONFIG_FILE="$U/etc/fonts/anyscp-fonts.conf"
+    # The distribution's fonts.conf includes "conf.d" (the aliases: sans-serif,
+    # monospace...) by a relative path, which fontconfig looks up here, not
+    # next to that file.  Without it every font name falls back to whatever
+    # font comes first.
+    export FONTCONFIG_PATH=/etc/fonts
 else
     export FONTCONFIG_FILE="$U/etc/fonts/anyscp-fonts-standalone.conf"
 fi
