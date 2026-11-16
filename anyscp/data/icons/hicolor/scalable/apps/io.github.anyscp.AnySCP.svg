@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#62a0ea"/>
+      <stop offset="1" stop-color="#1c71d8"/>
+    </linearGradient>
+    <linearGradient id="badge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#57e389"/>
+      <stop offset="1" stop-color="#26a269"/>
+    </linearGradient>
+    <linearGradient id="pane" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#deddda"/>
+    </linearGradient>
+  </defs>
+  <!-- base with depth -->
+  <rect x="10" y="18" width="108" height="100" rx="22" fill="#1a5fb4"/>
+  <rect x="10" y="12" width="108" height="100" rx="22" fill="url(#bg)"/>
+  <rect x="10.5" y="12.5" width="107" height="99" rx="21.5" fill="none" stroke="#ffffff" stroke-opacity="0.25"/>
+  <!-- left pane (local) -->
+  <rect x="22" y="26" width="38" height="64" rx="7" fill="url(#pane)"/>
+  <rect x="22" y="26" width="38" height="11" rx="7" fill="#c0bfbc"/>
+  <rect x="22" y="31" width="38" height="6" fill="#c0bfbc"/>
+  <rect x="28" y="44" width="10" height="7" rx="2" fill="#f8e45c"/>
+  <rect x="41" y="46" width="14" height="3" rx="1.5" fill="#9a9996"/>
+  <rect x="28" y="56" width="10" height="7" rx="2" fill="#99c1f1"/>
+  <rect x="41" y="58" width="11" height="3" rx="1.5" fill="#9a9996"/>
+  <rect x="28" y="68" width="10" height="7" rx="2" fill="#99c1f1"/>
+  <rect x="41" y="70" width="13" height="3" rx="1.5" fill="#9a9996"/>
+  <!-- right pane (remote) -->
+  <rect x="68" y="26" width="38" height="64" rx="7" fill="url(#pane)"/>
+  <rect x="68" y="26" width="38" height="11" rx="7" fill="#3d3846"/>
+  <rect x="68" y="31" width="38" height="6" fill="#3d3846"/>
+  <circle cx="74" cy="31.5" r="1.8" fill="#57e389"/>
+  <rect x="74" y="44" width="10" height="7" rx="2" fill="#f8e45c"/>
+  <rect x="87" y="46" width="14" height="3" rx="1.5" fill="#9a9996"/>
+  <rect x="74" y="56" width="10" height="7" rx="2" fill="#f8e45c"/>
+  <rect x="87" y="58" width="9" height="3" rx="1.5" fill="#9a9996"/>
+  <rect x="74" y="68" width="10" height="7" rx="2" fill="#99c1f1"/>
+  <rect x="87" y="70" width="12" height="3" rx="1.5" fill="#9a9996"/>
+  <!-- transfer badge -->
+  <circle cx="64" cy="92" r="19" fill="#165d3a" opacity="0.35"/>
+  <circle cx="64" cy="90" r="18" fill="url(#badge)"/>
+  <circle cx="64" cy="90" r="17.5" fill="none" stroke="#ffffff" stroke-opacity="0.35"/>
+  <g fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M54 85 H73 M68 79.5 L73.5 85 L68 90.5"/>
+    <path d="M74 96 H55 M60 90.5 L54.5 96 L60 101.5"/>
+  </g>
+</svg>

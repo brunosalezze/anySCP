@@ -1,0 +1,7 @@
+# MSYS2 packages of the Windows-on-ARM runtime (without the "mingw-w64-clang-aarch64-"
+# prefix); msys2_fetch.py adds their dependencies.  paramiko comes from conda-forge
+# instead (MSYS2 has a newer major version).  Used by setup-build-deps.sh and build.sh.
+python python-gobject python-cairo
+gtk4 libadwaita gtksourceview5 librsvg gdk-pixbuf2
+adwaita-icon-theme hicolor-icon-theme
+python-cryptography python-bcrypt python-pynacl

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anyscp"
+version = "1.0.0"
+description = "WinSCP-style SFTP/SCP/FTP(S)/WebDAV client for Linux and Windows built with GTK 4 and libadwaita"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["paramiko>=3.2", "PyGObject>=3.46", "cryptography>=42"]
+keywords = ["sftp", "scp", "ftp", "webdav", "winscp", "gtk4", "libadwaita"]
+classifiers = [
+    "Environment :: X11 Applications :: GTK",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Internet :: File Transfer Protocol (FTP)",
+]
+
+[project.urls]
+Homepage = "https://github.com/brunosalezze/anySCP"
+Source = "https://github.com/brunosalezze/anySCP"
+Issues = "https://github.com/brunosalezze/anySCP/issues"
+
+[project.scripts]
+anyscp = "anyscp.app:main"
+
+[tool.setuptools.packages.find]
+include = ["anyscp*"]
+
+[tool.setuptools.package-data]
+anyscp = ["data/*.css", "data/icons/hicolor/*/apps/*.svg", "data/icons/hicolor/*/actions/*.svg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,55 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 anySCP contributors
+# anySCP AppImage entry point.  Points Python, GObject introspection, GTK
+# data, fonts and image loaders at the bundled runtime in $APPDIR/usr.
+HERE="$(dirname "$(readlink -f "$0")")"
+U="$HERE/usr"
+
+# Remember everything we change, so anySCP can give the programs it starts
+# (default apps, terminals) the host environment back – see anyscp/compat.py.
+ANYSCP_UNSET_VARS=""
+for v in PATH PYTHONHOME PYTHONPATH PYTHONNOUSERSITE PYTHONSTARTUP PYTHONSAFEPATH \
+         GI_TYPELIB_PATH XDG_DATA_DIRS GSETTINGS_SCHEMA_DIR GDK_PIXBUF_MODULE_FILE \
+         GIO_MODULE_DIR GIO_EXTRA_MODULES FONTCONFIG_FILE XLOCALEDIR XKB_CONFIG_ROOT \
+         GTK_PATH GTK_EXE_PREFIX GTK_DATA_PREFIX GSETTINGS_BACKEND GSK_RENDERER; do
+    if eval "[ -n \"\${$v+x}\" ]"; then
+        eval "export ANYSCP_ORIG_$v=\"\$$v\""
+    else
+        ANYSCP_UNSET_VARS="$ANYSCP_UNSET_VARS:$v"
+    fi
+done
+export ANYSCP_UNSET_VARS
+
+export PATH="$U/bin:$PATH"
+export PYTHONHOME="$U"
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH PYTHONSTARTUP PYTHONSAFEPATH GIO_EXTRA_MODULES GTK_PATH GTK_EXE_PREFIX GTK_DATA_PREFIX
+export GI_TYPELIB_PATH="$U/lib/girepository-1.0"
+export XDG_DATA_DIRS="$U/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export GSETTINGS_SCHEMA_DIR="$U/share/glib-2.0/schemas"
+export GSETTINGS_BACKEND=memory      # GTK's internal settings: don't write outside the portable folder
+export GIO_MODULE_DIR="$U/lib/gio/modules"      # never load the host's GIO modules
+if [ -f /etc/fonts/fonts.conf ]; then
+    export FONTCONFIG_FILE="$U/etc/fonts/anyscp-fonts.conf"
+else
+    export FONTCONFIG_FILE="$U/etc/fonts/anyscp-fonts-standalone.conf"
+fi
+export XLOCALEDIR="$U/share/X11/locale"
+[ -d "$U/share/X11/xkb" ] && export XKB_CONFIG_ROOT="$U/share/X11/xkb"
+
+# gdk-pixbuf's cache lists loaders relative to the runtime folder
+export GDK_PIXBUF_MODULE_FILE="$U/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+
+# GTK's Vulkan renderer cannot present on an X server without DRI3 – virtual
+# and remote ones such as Xvfb, VNC and xrdp – and then quits instead of
+# falling back.  On X11 use GTK's OpenGL renderer, unless told otherwise.
+if [ -z "${GSK_RENDERER+x}" ] && [ -z "$WAYLAND_DISPLAY" ] && [ -n "$DISPLAY" ]; then
+    export GSK_RENDERER=ngl
+fi
+
+# Portable mode: settings in a "anySCP-data" folder next to the AppImage.
+[ -n "$APPIMAGE" ] && export ANYSCP_LAUNCHER_DIR="$(dirname "$APPIMAGE")"
+
+# (-P: never import an "anyscp" folder that happens to be in the current one)
+exec "$U/bin/python@PYVER@" -s -P -m anyscp "$@"

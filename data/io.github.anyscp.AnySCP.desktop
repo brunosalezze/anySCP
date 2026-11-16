@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=anySCP
+GenericName=File Transfer Client
+Comment=Transfer files over SFTP, SCP, FTP/FTPS and WebDAV
+Exec=anyscp %U
+Icon=io.github.anyscp.AnySCP
+Terminal=false
+Categories=Network;FileTransfer;GTK;GNOME;
+Keywords=sftp;scp;ftp;ftps;webdav;ssh;winscp;upload;download;sync;
+StartupNotify=true
+StartupWMClass=io.github.anyscp.AnySCP
+DBusActivatable=false
