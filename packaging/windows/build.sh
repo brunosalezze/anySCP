@@ -30,7 +30,11 @@ TOOLS="$ROOT/build/tools"
 WORK="$ROOT/build/windows"
 CONDA_ENV="$WORK/env"
 DIST="$ROOT/dist"
+# The Linux runtime's tools (glib-compile-schemas, and Python with librsvg
+# for the icon), so that nothing GTK-related is needed on the build machine.
+LINUX_ENV="$ROOT/build/appimage/env"
 missing() { echo "Missing $1 – run packaging/setup-build-deps.sh first." >&2; exit 1; }
+[ -x "$LINUX_ENV/bin/python3" ] || missing "$LINUX_ENV"
 
 ARCH="${1:-x64}"
 case "$ARCH" in
@@ -111,13 +115,13 @@ if [ "$LAYOUT" = conda ]; then
     cp "$HERE/sitecustomize.py" "$RT/Lib/site-packages/"
 
     # Post-link steps that conda would have run on Windows
-    glib-compile-schemas "$RT/Library/share/glib-2.0/schemas"
+    "$LINUX_ENV/bin/glib-compile-schemas" "$RT/Library/share/glib-2.0/schemas"
     # (GTK ≥ 4.20 renders SVG icons itself; gdk-pixbuf's shipped loaders.cache is fine as is.)
 else
     # Everything is in a Unix-like tree; Python finds the DLLs next to
     # pythonw.exe, so no sitecustomize is needed.
     python3 "$HERE/stage_msys2.py" "$ENV" "$RT" "$CONDA_ENV"
-    glib-compile-schemas "$RT/share/glib-2.0/schemas"          # (pacman's install hook would have)
+    "$LINUX_ENV/bin/glib-compile-schemas" "$RT/share/glib-2.0/schemas"   # (pacman's install hook would have)
 fi
 
 # ---------------------------------------------------------------- app
@@ -141,8 +145,8 @@ echo "==> Runtime size: $(du -sh "$RT" | cut -f1)"
 echo "==> Compiling the launcher ($("$CC" --version | head -1))"
 LAUNCH="$WORK/launcher-$ARCH"
 mkdir -p "$LAUNCH"
-python3 "$HERE/make_ico.py" "$ROOT/anyscp/data/icons/hicolor/scalable/apps/io.github.anyscp.AnySCP.svg" \
-    "$LAUNCH/anyscp.ico"
+GI_TYPELIB_PATH="$LINUX_ENV/lib/girepository-1.0" "$LINUX_ENV/bin/python3" -s "$HERE/make_ico.py" \
+    "$ROOT/anyscp/data/icons/hicolor/scalable/apps/io.github.anyscp.AnySCP.svg" "$LAUNCH/anyscp.ico"
 sed -e "s/@ARCH@/$MANIFEST_ARCH/" "$HERE/launcher.manifest" > "$LAUNCH/launcher.manifest"
 VER_COMMA=$(echo "$VERSION" | awk -F. '{printf "%d,%d,%d", $1, $2+0, $3+0}')
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@VER_COMMA@/$VER_COMMA/g" "$HERE/launcher.rc" > "$LAUNCH/launcher.rc"

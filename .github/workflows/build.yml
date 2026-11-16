@@ -80,6 +80,8 @@ jobs:
 
       - name: AppImages (x86-64, arm64)
         run: |
+          # (the MIME database the AppImages carry is made from the host's)
+          sudo apt-get install -y --no-install-recommends shared-mime-info
           packaging/appimage/build.sh
           packaging/appimage/build.sh aarch64
 
