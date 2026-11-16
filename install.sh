@@ -38,7 +38,7 @@ if [ -n "$missing" ]; then
     echo "  sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-paramiko \\"
     echo "       gir1.2-gtksource-5 gir1.2-vte-3.91 gir1.2-secret-1"
     echo "On Fedora:  sudo dnf install python3-gobject gtk4 libadwaita python3-paramiko gtksourceview5 vte291-gtk4 libsecret"
-    echo "Older Paramiko or cryptography (Ubuntu 24.04): see \"Requirements\" in README.md."
+    echo "Ubuntu 24.04 and older are too old to run anySCP from source: use the AppImage."
     exit 1
 fi
 

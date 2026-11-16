@@ -138,17 +138,8 @@ sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-paramiko \
                  gir1.2-gtksource-5 gir1.2-vte-3.91 gir1.2-secret-1
 ```
 
-Ubuntu 24.04 LTS has the GTK parts but an older Paramiko (2.12) and cryptography (41).
-Use the AppImage there, or take those two from PyPI in a virtual environment and run
-`./anyscp.sh` or `./install.sh` with it activated:
-
-```sh
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-venv \
-                 gir1.2-gtksource-5 gir1.2-vte-3.91 gir1.2-secret-1
-python3 -m venv --system-site-packages ~/.local/share/anyscp-venv
-~/.local/share/anyscp-venv/bin/pip install "paramiko>=3.2" "cryptography>=42"
-. ~/.local/share/anyscp-venv/bin/activate
-```
+**Ubuntu 24.04 LTS and older are not supported from source**: their Paramiko (2.12) and
+cryptography (41) are older than anySCP needs. Use the AppImage there; it brings its own.
 
 Fedora:
 
