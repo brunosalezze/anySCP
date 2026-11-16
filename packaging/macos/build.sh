@@ -80,6 +80,11 @@ PRUNE=(
 (cd "$R" && for p in "${PRUNE[@]}"; do rm -rf $p; done)      # (unquoted: the patterns expand)
 find "$R" \( -name __pycache__ -o -name '*.pyc' -o -name icon-theme.cache -o -name gschemas.compiled \) \
     -prune -exec rm -rf {} +
+# Links into what was pruned are left dangling, and codesign refuses to seal
+# a bundle holding any; links out of the bundle would break once it moves.
+find "$R" -type l ! -exec test -e {} \; -print -delete | sed "s|^$R/|    removed dangling link: |"
+find "$R" -type l -lname '/*' -print | sed "s|^$R/|    absolute link (left out): |"
+find "$R" -type l -lname '/*' -delete
 "$ENV/bin/glib-compile-schemas" "$R/share/glib-2.0/schemas"
 # gdk-pixbuf's loaders, with paths relative to the runtime
 PIXBUF=lib/gdk-pixbuf-2.0/2.10.0
@@ -127,8 +132,8 @@ otool -L "$LAUNCHER" | grep -q "@rpath/libpython$PYVER.dylib" \
 echo "==> Signing (ad hoc)"
 find "$R" -type f \( -name '*.dylib' -o -name '*.so' \) -print0 \
     | xargs -0 codesign --force --sign - 2>&1 | grep -v "replacing existing signature" || true
-codesign --force --sign - "$APP"
-codesign --verify --strict "$APP"
+codesign --force --sign - --verbose=2 "$APP"
+codesign --verify --strict --verbose=2 "$APP"
 echo "    runtime size: $(du -sh "$APP" | cut -f1)"
 
 # ---------------------------------------------------------------- disk image
