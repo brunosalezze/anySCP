@@ -74,8 +74,10 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends python3-gi gir1.2-glib-2.0 python3-venv openssh-server
           python3 -m venv --system-site-packages .venv
-          # (Ubuntu 24.04's own paramiko and cryptography are older than anySCP needs)
-          .venv/bin/pip install -q pytest pyftpdlib pyopenssl wsgidav cheroot "paramiko>=3.4,<4" "cryptography>=42"
+          # Only PyGObject comes from Ubuntu: its paramiko and cryptography are older than
+          # anySCP needs, and its pyOpenSSL does not work with a newer cryptography.
+          .venv/bin/pip install -q --ignore-installed pytest pyftpdlib pyopenssl wsgidav cheroot \
+              "paramiko>=3.4,<4" "cryptography>=42"
           .venv/bin/python -m pytest -q
 
       - name: AppImages (x86-64, arm64)
