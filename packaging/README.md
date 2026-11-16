@@ -60,6 +60,30 @@ Everything except the apt packages and Docker images stays in `build/` (about 6 
 
 Re-run them after changing the app. They copy the runtime again, prune it and repack.
 
+## macOS (Apple Silicon, experimental)
+
+`packaging/macos/build.sh` runs on a Mac with Apple Silicon, not on the Linux build
+machine; the GitHub Actions workflow runs it on a `macos-15` runner. It needs only the
+Xcode command line tools: it downloads micromamba and the conda-forge runtime itself
+(the same packages as the other builds, with `keyring` for the Keychain; conda-forge has
+no VTE for macOS, so the terminal opens in Terminal.app). It makes
+`build/macos/anySCP.app` and `dist/anySCP-<ver>-macos-arm64.dmg`.
+
+- The runtime goes into `anySCP.app/Contents/Resources`, pruned as in the AppImage.
+- `Contents/MacOS/anySCP` is a small C program (`launcher.c`) that runs Python inside its
+  own process, linked to the runtime's `libpython`. So macOS sees the app as anySCP (menu
+  bar, Dock, Keychain prompts), not as `python3`. It sets up the environment as `AppRun`
+  does, and remembers the values it replaces for the programs anySCP starts.
+- The bytecode is "unchecked-hash" and `PYTHONDONTWRITEBYTECODE` is set: Python never
+  writes into the bundle, which would break its signature.
+- The bundle is signed ad hoc (Apple Silicon runs only signed code). Without a paid Apple
+  Developer ID it cannot be notarized, so people approve its first start once (README).
+- There is no build for Intel Macs, which Apple is phasing out; `build.sh` stops on them.
+- In CI the job also runs `--self-test` with `ANYSCP_SELFTEST_SCREENSHOT`, which saves a
+  picture of the window as GTK draws it (`dist/macos-window.png`, in the job's artifact),
+  and the backend tests. While nobody has tried it on a real Mac, the job may fail
+  without failing the workflow run.
+
 ## How it works
 
 **AppImage** (`appimage/`):

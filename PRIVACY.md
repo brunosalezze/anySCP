@@ -16,16 +16,18 @@ About dialog open in your web browser, and only when you click them.
 - **Settings, saved sites, bookmarks, server host keys and trusted
   certificates** are stored in anySCP's settings folder. In portable mode
   that is the `anySCP-data` folder next to the program. Otherwise it is
-  `~/.config/anyscp` on Linux and `%APPDATA%\anySCP` on Windows. A saved
+  `~/.config/anyscp` on Linux, `%APPDATA%\anySCP` on Windows and
+  `~/Library/Application Support/anySCP` on macOS. A saved
   site holds the server's address, your user name and folders, but never
   your password.
 - **Passwords** are stored only if you choose "Remember password". They go
-  into your system's keyring (GNOME Keyring, KWallet, ...) or the Windows
-  Credential Manager, never into a file of anySCP's.
+  into your system's keyring (GNOME Keyring, KWallet, ...), the Windows
+  Credential Manager or the macOS Keychain, never into a file of anySCP's.
 - **Copies of remote files you open in another program** are stored in
   anySCP's cache folder, under `edit`. That is `anySCP-data/cache` in
-  portable mode, `~/.cache/anyscp` on Linux, and
-  `%LOCALAPPDATA%\anySCP\cache` on Windows. They stay there until you delete
+  portable mode, `~/.cache/anyscp` on Linux,
+  `%LOCALAPPDATA%\anySCP\cache` on Windows and `~/Library/Caches/anySCP`
+  on macOS. They stay there until you delete
   them.
 - **Copies of files you drag out of the window to another program** are kept
   in the system's temporary folder (`anySCP-drag`), and anySCP removes them

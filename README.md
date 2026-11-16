@@ -1,6 +1,7 @@
 # anySCP
 
-A file transfer client for Linux and Windows modeled on [WinSCP](https://github.com/winscp/winscp).
+A file transfer client for Linux and Windows (and, experimentally, macOS) modeled on
+[WinSCP](https://github.com/winscp/winscp).
 It has WinSCP's two-pane *Commander* layout, transfer queue, built-in editor and
 directory synchronization. The interface uses **GTK 4 and libadwaita 1.7**, the
 current GNOME toolkit, so it looks native on a modern Linux desktop and follows the
@@ -88,11 +89,23 @@ Download the file for your system from the
 | Linux (arm64: Raspberry Pi 4/5 with a 64-bit OS, ARM servers; glibc ≥ 2.28) | `anySCP-1.0.0-aarch64.AppImage` | the same |
 | Windows 10/11 (x64) | `anySCP-1.0.0-windows-x64.exe` | Double-click. The first start takes a little longer while it unpacks itself. |
 | Windows 11 on ARM (Snapdragon PCs, Surface Pro X/11) | `anySCP-1.0.0-windows-arm64.exe` | the same |
+| macOS 11 or newer on Apple Silicon (M1 and later), **experimental** | `anySCP-1.0.0-macos-arm64.dmg` | Open it and drag anySCP to Applications; the first start needs your approval, see below. |
 
 Each one includes Python, GTK 4.24, libadwaita 1.10 and every other dependency.
 (Windows on ARM can also run the x64 build, emulated; the arm64 one runs natively and is faster.)
 If an AppImage says it cannot mount itself (no FUSE, as on minimal or headless systems), install
 `fuse3` or start it with `--appimage-extract-and-run`.
+
+**macOS is experimental.** The app is built and self-tested automatically on GitHub's
+Apple Silicon Macs, but nobody has tried it on a real Mac yet: reports are welcome. Intel
+Macs are not supported. There the terminal opens in Terminal.app, saved passwords go
+into the Keychain, and the shortcuts use ⌘ instead of Ctrl. The app is not notarized by
+Apple (that needs a paid Apple Developer ID), so macOS blocks its first start: open it
+once, then go to System Settings → Privacy & Security and click **Open Anyway** (on
+macOS 14 and older, Control-click the app and choose Open). In a terminal,
+`xattr -dr com.apple.quarantine /Applications/anySCP.app` does the same.
+On macOS, settings live in `~/Library/Application Support/anySCP` (portable mode
+only if you create an `anySCP-data` folder next to anySCP.app yourself).
 The packages are **portable**. On first start they create an `anySCP-data`
 folder next to themselves, and all settings, saved sites and host keys live
 there, so you can carry anySCP on a USB stick. If that location isn't writable,
