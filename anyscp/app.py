@@ -134,7 +134,7 @@ class AnySCPApplication(Adw.Application):
             license_type=Gtk.License.GPL_3_0,
             website="https://github.com/brunosalezze/anySCP",
             issue_url="https://github.com/brunosalezze/anySCP/issues",
-            comments="A WinSCP-style file transfer client for Linux and Windows. Browse and transfer files over "
+            comments="A WinSCP-style file transfer client for Linux, Windows and macOS. Browse and transfer files over "
                      "SFTP, SCP, FTP/FTPS and WebDAV with a dual-pane commander, a transfer queue, "
                      "an integrated editor and terminal.",
         )

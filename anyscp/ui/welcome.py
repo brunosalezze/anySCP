@@ -32,7 +32,7 @@ class WelcomePage(Gtk.ScrolledWindow):
         title = Gtk.Label(label="anySCP")
         title.add_css_class("title-1")
         box.append(title)
-        tagline = Gtk.Label(label="Secure file transfer for Linux and Windows — SFTP, SCP, FTP(S) and WebDAV")
+        tagline = Gtk.Label(label="Secure file transfer with SFTP, SCP, FTP(S) and WebDAV")
         tagline.add_css_class("dim-label")
         tagline.set_wrap(True)
         tagline.set_justify(Gtk.Justification.CENTER)

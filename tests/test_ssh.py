@@ -115,7 +115,8 @@ def test_clone_and_exec(fs):
         assert other.listdir(fs.test_base) == []
         status, out, _ = fs.exec("echo hi")
         assert status == 0 and out.strip() == "hi"
-        assert fs.realpath(fs.test_base + "/../" + posixpath.basename(fs.test_base)) == fs.test_base
+        # (the real path: on macOS /var is a link to /private/var)
+        assert fs.realpath(fs.test_base + "/../" + posixpath.basename(fs.test_base)) == os.path.realpath(fs.test_base)
     finally:
         other.close()
     # original still alive after closing the clone

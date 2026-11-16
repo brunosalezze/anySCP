@@ -126,11 +126,15 @@ jobs:
       - name: anySCP.app and its disk image
         run: packaging/macos/build.sh
 
-      - name: Self-test, with a picture of the window
+      # The app as people get it: from the disk image, read-only
+      - name: Self-test of the app in the disk image, with a picture of the window
         timeout-minutes: 5
         run: |
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" dist/anySCP-*-macos-arm64.dmg
+          codesign --verify --strict --verbose=1 "$RUNNER_TEMP/dmg/anySCP.app"
           ANYSCP_SELFTEST_SCREENSHOT="$PWD/dist/macos-window.png" \
-              build/macos/anySCP.app/Contents/MacOS/anySCP --self-test
+              "$RUNNER_TEMP/dmg/anySCP.app/Contents/MacOS/anySCP" --self-test
+          hdiutil detach "$RUNNER_TEMP/dmg"
 
       - name: Backend tests
         run: |

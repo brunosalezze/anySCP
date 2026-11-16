@@ -112,9 +112,14 @@ TunnelHostName=bastion.example.com
 
 def test_portable_folder_is_created_next_to_the_launcher(tmp_path, monkeypatch):
     import os
+    import sys
     from anyscp import config
     monkeypatch.setenv("ANYSCP_LAUNCHER_DIR", str(tmp_path))
     monkeypatch.delenv("ANYSCP_PORTABLE", raising=False)
+    if sys.platform == "darwin":
+        # next to an app (usually in /Applications) only a folder made by hand counts
+        assert config._portable_dir() is None and not (tmp_path / "anySCP-data").exists()
+        (tmp_path / "anySCP-data").mkdir()
     assert config._portable_dir() == tmp_path / "anySCP-data"
     assert (tmp_path / "anySCP-data").is_dir()
     # read-only location: fall back to the per-user folders, leave nothing behind
