@@ -30,6 +30,8 @@
 #
 # Everything except the apt packages and docker images stays inside build/.
 # Needs roughly 6 GB of disk space; the downloads take a few minutes.
+# With ANYSCP_CI=1 (the GitHub Actions build) only what building needs is set
+# up: no Wine and no docker test images.
 # Without docker, steps 5 and 6 are skipped: the arm64 AppImage then has no
 # syntax highlighting in the editor and no embedded terminal.
 
@@ -64,6 +66,8 @@ mapfile -t MSYS2_PKGS < <(grep -v '^#' "$ROOT/packaging/windows/msys2-packages.t
 LLVM_MINGW_VERSION=20261104
 LLVM_MINGW_SHA256=919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926
 
+CI_MODE="${ANYSCP_CI:-}"
+
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 ok()   { printf '    \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '    \033[33m!\033[0m %s\n' "$*"; }
@@ -81,8 +85,10 @@ mkdir -p "$TOOLS/bin" "$BUILD/appimage" "$BUILD/windows" "$MAMBA_ROOT_PREFIX"
 step "1/6  System packages (apt)"
 need=()
 command -v x86_64-w64-mingw32-gcc >/dev/null || need+=(gcc-mingw-w64-x86-64)
-command -v wine >/dev/null || need+=(wine)
-command -v wine64 >/dev/null || [ -x /usr/lib/wine/wine64 ] || need+=(wine64)
+if [ -z "$CI_MODE" ]; then          # (Wine: only to test the Windows build)
+    command -v wine >/dev/null || need+=(wine)
+    command -v wine64 >/dev/null || [ -x /usr/lib/wine/wine64 ] || need+=(wine64)
+fi
 command -v curl >/dev/null || need+=(curl)
 command -v unzip >/dev/null || need+=(unzip)
 command -v zstd >/dev/null || need+=(zstd)
@@ -94,7 +100,7 @@ if [ ${#need[@]} -gt 0 ]; then
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${need[@]}"
 fi
 x86_64-w64-mingw32-gcc --version | head -1 | sed 's/^/    /'
-wine --version | sed 's/^/    /'
+if command -v wine >/dev/null; then wine --version | sed 's/^/    /'; fi
 [ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] \
     || warn "arm64 programs cannot run here (no qemu-aarch64 binfmt entry): step 6 and the arm64 tests will fail"
 ok "system packages ready"
@@ -279,6 +285,10 @@ step "5/6  Docker test images (AppImage portability check)"
 HAVE_DOCKER=0
 if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
     HAVE_DOCKER=1
+fi
+if [ -n "$CI_MODE" ]; then
+    ok "skipped (CI build: the test images are only for the portability tests)"
+elif [ "$HAVE_DOCKER" = 1 ]; then
     for tag in 22.04 24.04; do
         if docker image inspect "anyscp-test:$tag" >/dev/null 2>&1; then
             ok "anyscp-test:$tag already built"
