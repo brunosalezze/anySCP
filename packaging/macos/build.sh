@@ -51,7 +51,9 @@ if [ ! -x "$ENV/bin/python3" ]; then
     echo "==> Creating the runtime (conda-forge, osx-arm64)"
     "$MM" create -y -q -p "$ENV" -c conda-forge --override-channels "${PKGS[@]}"
 fi
-PYVER=$(cd "$ENV/lib" && for d in python3.*; do [ -f "$d/os.py" ] && echo "${d#python}"; done | head -1)
+# (the real folder: lib/ also has a python3.1 symlink)
+PYVER=$(cd "$ENV/lib" && for d in python3.*; do [ ! -L "$d" ] && [ -f "$d/os.py" ] && echo "${d#python}"; done | head -1)
+[ -f "$ENV/include/python$PYVER/Python.h" ] || { echo "no Python headers for Python $PYVER in $ENV" >&2; exit 1; }
 echo "==> anySCP $VERSION for macOS (Apple Silicon), Python $PYVER"
 
 # ---------------------------------------------------------------- app bundle
