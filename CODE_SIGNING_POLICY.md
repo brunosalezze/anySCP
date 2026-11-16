@@ -19,4 +19,5 @@ This program will not transfer any information to other networked systems
 unless specifically requested by the user or the person installing or
 operating it. anySCP connects only to the servers (and proxies and jump hosts)
 that you enter, to transfer the files you choose. It has no telemetry and does
-not check for updates.
+not check for updates. The full privacy policy, including what anySCP stores
+on your computer, is in [PRIVACY.md](PRIVACY.md).

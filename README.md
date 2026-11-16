@@ -79,6 +79,9 @@ import your saved WinSCP sites.
 
 ## Download and run (portable, nothing to install)
 
+Download the file for your system from the
+[Releases page](https://github.com/brunosalezze/anySCP/releases).
+
 | Platform | File | How to run |
 |---|---|---|
 | Linux (x86-64, glibc ≥ 2.28) | `anySCP-1.0.0-x86_64.AppImage` | `chmod +x anySCP-*.AppImage && ./anySCP-*.AppImage` |
@@ -98,6 +101,8 @@ use the per-user folders. Saved passwords stay in the system keyring or
 Windows Credential Manager of each computer, never in the folder. See
 [packaging/README.md](packaging/README.md) to build them yourself, and
 [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) for the code signing policy of the Windows programs.
+anySCP collects no data and connects only to the servers you enter; see the
+[privacy policy](PRIVACY.md).
 
 ### Running from a network share (SMB/NFS)
 
