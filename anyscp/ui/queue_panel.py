@@ -9,6 +9,7 @@ import math
 
 from gi.repository import Adw, GLib, Graphene, Gsk, Gtk, Pango
 
+from ..compat import shortcut_label
 from ..transfer import CANCELLED, DONE, FAILED, QUEUED, RUNNING
 from ..utils import format_duration, format_size, format_speed
 
@@ -154,7 +155,7 @@ class QueuePanel(Gtk.Box):
         self.clear_btn.add_css_class("flat")
         self.clear_btn.connect("clicked", lambda *_a: manager.clear_finished())
         bar.append(self.clear_btn)
-        self.close_btn = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Hide (Ctrl+J)")
+        self.close_btn = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=shortcut_label("Hide (Ctrl+J)"))
         self.close_btn.add_css_class("flat")
         bar.append(self.close_btn)          # the window connects it
         self.append(bar)

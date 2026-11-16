@@ -21,6 +21,7 @@ import string
 import sys
 
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 
 
 def _is_internal_windows(path: str) -> bool:
@@ -106,6 +107,24 @@ def home_dir() -> str:
     return to_internal(os.path.expanduser("~"))
 
 
+_MAC_KEYS = {"Ctrl": "\u2318", "Alt": "\u2325", "Shift": "\u21e7"}     # ⌘ ⌥ ⇧
+_MAC_ORDER = "\u2303\u2325\u21e7\u2318"                                 # ⌃ ⌥ ⇧ ⌘, Apple's order
+
+
+def _mac_shortcut(match) -> str:
+    *mods, key = match.group(0).split("+")
+    return "".join(sorted((_MAC_KEYS[m] for m in mods), key=_MAC_ORDER.index)) + key
+
+
+def shortcut_label(text: str) -> str:
+    """Shortcuts in a text the way this platform writes them: on macOS,
+    where ⌘ does what Ctrl does elsewhere, "Ctrl+Shift+C" is "⇧⌘C"."""
+    if not IS_MACOS:
+        return text
+    import re
+    return re.sub(r"\b(?:(?:Ctrl|Alt|Shift)\+)+[^\s+/),]+", _mac_shortcut, text)
+
+
 def tilde(path: str) -> str:
     """A local path for display, with the home folder shown as "~"."""
     home = home_dir().rstrip("/")
@@ -156,6 +175,17 @@ def open_external_terminal(host: str, port: int, user: str, key_file: str = "") 
             return None
         if not shutil.which("ssh"):
             return "The OpenSSH client (ssh) is not installed."
+        if IS_MACOS:
+            # Terminal runs a .command file it is given; the script removes
+            # itself before it becomes ssh.
+            import shlex
+            import tempfile
+            fd, script = tempfile.mkstemp(prefix="anySCP-ssh-", suffix=".command")
+            with os.fdopen(fd, "w") as fh:
+                fh.write('#!/bin/sh\nrm -f "$0"\nexec ' + " ".join(shlex.quote(a) for a in ssh_args) + "\n")
+            os.chmod(script, 0o700)
+            subprocess.Popen(["open", "-a", "Terminal", script], env=host_env())
+            return None
         for term, flag in (("x-terminal-emulator", "-e"), ("gnome-terminal", "--"), ("kgx", "--"),
                            ("ptyxis", "--"), ("konsole", "-e"), ("xfce4-terminal", "-x"),
                            ("alacritty", "-e"), ("kitty", ""), ("foot", ""), ("xterm", "-e")):
@@ -211,6 +241,9 @@ def open_path(native: str, reveal: bool = False) -> bool:
         else:
             subprocess.Popen(["cmd", "/c", "start", "", native], env=host_env(), cwd=safe_cwd(),
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return True
+    if IS_MACOS:
+        subprocess.Popen(["open", "-R", native] if reveal else ["open", native], env=host_env())
         return True
     if not is_bundled():
         return False

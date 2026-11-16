@@ -138,14 +138,15 @@ def description_for_type(ctype: str) -> str:
     return Gio.content_type_get_description(ctype) or ctype
 
 
-_WIN = sys.platform == "win32"
+# Windows' content types are file extensions and macOS' are UTIs, not MIME
+# types: there Python's table is used.
+_WIN = sys.platform in ("win32", "darwin")
 _ARCHIVES = ("zip", "tar", "gzip", "bzip", "xz", "7z", "rar", "zstd", "compressed", "archive")
 
 
 @functools.lru_cache(maxsize=2048)
 def mime_for(name: str) -> str:
-    """MIME type from the file name.  On Windows GIO content types are file
-    extensions, so Python's table is used there instead."""
+    """MIME type from the file name (Python's table on Windows and macOS)."""
     if _WIN:
         return mimetypes.guess_type(name, strict=False)[0] or "application/octet-stream"
     ctype = content_type_for(name)

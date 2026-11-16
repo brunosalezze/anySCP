@@ -8,6 +8,8 @@ import posixpath
 
 from gi.repository import GLib, GObject, Gtk
 
+from ..compat import shortcut_label
+
 
 class PathBar(Gtk.Box):
     __gsignals__ = {"navigate": (GObject.SignalFlags.RUN_FIRST, None, (str,))}
@@ -51,7 +53,7 @@ class PathBar(Gtk.Box):
         self.stack.add_named(self.entry, "entry")
 
         self.edit_button = Gtk.Button(icon_name="document-edit-symbolic",
-                                      tooltip_text="Type a path (Ctrl+L)")
+                                      tooltip_text=shortcut_label("Type a path (Ctrl+L)"))
         self.edit_button.add_css_class("flat")
         self.edit_button.add_css_class("pathbar-edit")
         self.edit_button.connect("clicked", lambda *_a: self.start_editing())

@@ -174,7 +174,7 @@ class FilePane(Gtk.Box):
 
         self.home_btn = self._tool_button("go-home-symbolic", "Home folder", self.go_home)
         bar.append(self.home_btn)
-        self.refresh_btn = self._tool_button("view-refresh-symbolic", "Refresh (Ctrl+R)", self.refresh)
+        self.refresh_btn = self._tool_button("view-refresh-symbolic", compat.shortcut_label("Refresh (Ctrl+R)"), self.refresh)
         bar.append(self.refresh_btn)
 
         self.bookmark_btn = Gtk.MenuButton(icon_name="starred-symbolic", tooltip_text="Bookmarks")
@@ -185,7 +185,7 @@ class FilePane(Gtk.Box):
         self.bookmark_popover.connect("show", lambda *_a: self._fill_bookmarks())
         bar.append(self.bookmark_btn)
 
-        self.filter_btn = Gtk.ToggleButton(icon_name="edit-find-symbolic", tooltip_text="Filter (Ctrl+F)")
+        self.filter_btn = Gtk.ToggleButton(icon_name="edit-find-symbolic", tooltip_text=compat.shortcut_label("Filter (Ctrl+F)"))
         self.filter_btn.add_css_class("flat")
         bar.append(self.filter_btn)
         if self.is_local:

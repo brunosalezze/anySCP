@@ -190,10 +190,28 @@ def run_checks(app) -> dict:
     _check(results, "icons", icons)
     _check(results, "fonts", fonts)
     _check(results, "main window", window)
+    shot = os.environ.get("ANYSCP_SELFTEST_SCREENSHOT")
+    if shot:
+        _check(results, "screenshot", lambda: _screenshot(app, shot))
     if compat.IS_WINDOWS:
         _check(results, "drives", lambda: ", ".join(compat.list_drives()))
 
     return {"ok": all(r["ok"] for r in results), "info": info, "checks": results}
+
+
+def _screenshot(app, path: str) -> str:
+    """The main window as a PNG (ANYSCP_SELFTEST_SCREENSHOT), as GTK draws it:
+    a look at a machine nobody sits at, such as a CI runner."""
+    import gi
+    gi.require_version("Graphene", "1.0")
+    from gi.repository import Graphene, Gtk
+    win = app.get_active_window() or getattr(app, "window", None)
+    width, height = win.get_width(), win.get_height()
+    snap = Gtk.Snapshot()
+    Gtk.WidgetPaintable.new(win).snapshot(snap, width, height)
+    texture = win.get_native().get_renderer().render_texture(snap.to_node(), Graphene.Rect().init(0, 0, width, height))
+    texture.save_to_png(path)
+    return f"{path} ({width}×{height})"
 
 
 def print_report(report: dict) -> None:

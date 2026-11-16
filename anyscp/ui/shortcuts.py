@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from gi.repository import Adw, Gtk
 
+from .. import compat
+
 GROUPS = [
     ("Sessions", [
         ("New session / site manager", "Ctrl+N"),
@@ -75,6 +77,11 @@ class ShortcutsDialog(Adw.Dialog):
                         lab = Gtk.Label(label=alt)
                         lab.add_css_class("dim-label")
                         box.append(lab)
+                        continue
+                    if compat.IS_MACOS:         # one cap, written the Mac way: ⇧⌘F
+                        cap = Gtk.Label(label=compat.shortcut_label(alt))
+                        cap.add_css_class("keycap")
+                        box.append(cap)
                         continue
                     for j, key in enumerate(alt.split("+") if alt != "Ctrl+=" else ["Ctrl", "="]):
                         if j:

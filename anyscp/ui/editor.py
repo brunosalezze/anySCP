@@ -16,6 +16,7 @@ try:
 except (ValueError, ImportError):  # pragma: no cover - optional dependency
     GtkSource = None
 
+from ..compat import shortcut_label
 from ..utils import format_size
 from .prompts import alert, show_error
 
@@ -107,11 +108,11 @@ class EditorWindow(Adw.ApplicationWindow):
                                             subtitle=("" if pane.is_local else f"{page.title}:") +
                                             posixpath.dirname(info.path))
         header.set_title_widget(self.title_widget)
-        self.save_btn = Gtk.Button(label="_Save", use_underline=True, tooltip_text="Save (Ctrl+S)")
+        self.save_btn = Gtk.Button(label="_Save", use_underline=True, tooltip_text=shortcut_label("Save (Ctrl+S)"))
         self.save_btn.add_css_class("suggested-action")
         self.save_btn.connect("clicked", lambda *_a: self.save())
         header.pack_start(self.save_btn)
-        self.search_btn = Gtk.ToggleButton(icon_name="edit-find-symbolic", tooltip_text="Find (Ctrl+F)")
+        self.search_btn = Gtk.ToggleButton(icon_name="edit-find-symbolic", tooltip_text=shortcut_label("Find (Ctrl+F)"))
         header.pack_end(self.search_btn)
         menu = Gio.Menu()
         menu.append("Wrap Lines", "editor.wrap")
@@ -221,11 +222,11 @@ class EditorWindow(Adw.ApplicationWindow):
         self.insert_action_group("editor", group)
 
         controller = Gtk.ShortcutController(scope=Gtk.ShortcutScope.MANAGED)
-        controller.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control>s"),
+        controller.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Primary>s"),
                                              action=Gtk.CallbackAction.new(lambda *_a: (self.save(), True)[1])))
-        controller.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control>f"),
+        controller.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Primary>f"),
                                              action=Gtk.CallbackAction.new(self._start_search)))
-        controller.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control>w"),
+        controller.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Primary>w"),
                                              action=Gtk.CallbackAction.new(lambda *_a: (self.close(), True)[1])))
         controller.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("F3"),
                                              action=Gtk.CallbackAction.new(lambda *_a: (self._find(True), True)[1])))

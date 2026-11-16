@@ -70,8 +70,8 @@ class AnySCPApplication(Adw.Application):
             parallel=self.settings["parallel_transfers"])
 
         for name, cb, accels in (
-            ("quit", self._quit, ["<Control>q"]),
-            ("preferences", self._preferences, ["<Control>comma"]),
+            ("quit", self._quit, ["<Primary>q"]),
+            ("preferences", self._preferences, ["<Primary>comma"]),
             ("about", self._about, []),
         ):
             action = Gio.SimpleAction.new(name, None)

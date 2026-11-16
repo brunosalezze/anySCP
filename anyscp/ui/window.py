@@ -33,19 +33,19 @@ PAGE_ACTIONS = {
     "delete": ["F8"],
     "properties": ["F9"],
     "newfile": ["<Shift>F4"],
-    "refresh": ["<Control>r"],
-    "filter": ["<Control>f"],
-    "focus-path": ["<Control>l"],
-    "sync": ["<Control>s"],
-    "compare": ["<Control>equal"],
-    "find": ["<Control><Shift>f"],
-    "terminal": ["<Control><Shift>t"],
+    "refresh": ["<Primary>r"],
+    "filter": ["<Primary>f"],
+    "focus-path": ["<Primary>l"],
+    "sync": ["<Primary>s"],
+    "compare": ["<Primary>equal"],
+    "find": ["<Primary><Shift>f"],
+    "terminal": ["<Primary><Shift>t"],
     "info": [],
     "log": [],
     "reconnect": [],
     "sync-browse": [],
     "duplicate": [],
-    "copy-path": ["<Control><Shift>c"],
+    "copy-path": ["<Primary><Shift>c"],
 }
 
 
@@ -79,11 +79,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.window_title = Adw.WindowTitle(title="anySCP")
         header.set_title_widget(self.window_title)
 
-        new_btn = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text="New Session (Ctrl+N)",
+        new_btn = Gtk.Button(icon_name="tab-new-symbolic", tooltip_text=compat.shortcut_label("New Session (Ctrl+N)"),
                              action_name="win.new-session")
         header.pack_start(new_btn)
 
-        self.queue_btn = Gtk.ToggleButton(tooltip_text="Transfers (Ctrl+J)")
+        self.queue_btn = Gtk.ToggleButton(tooltip_text=compat.shortcut_label("Transfers (Ctrl+J)"))
         self.queue_btn.add_css_class("image-button")
         self.queue_btn.set_child(ProgressIcon(self.transfers))
         self.queue_btn.bind_property("active", view, "reveal-bottom-bars",
@@ -181,13 +181,13 @@ class MainWindow(Adw.ApplicationWindow):
                 app.set_accels_for_action(f"win.{name}", list(accels))
             return action
 
-        add("new-session", self.show_sites, ["<Control>n", "<Control>t"])
+        add("new-session", self.show_sites, ["<Primary>n", "<Primary>t"])
         add("new-site", lambda: SiteDialog(self, select_new=True).present(self), [])
-        add("close-tab", self.close_current, ["<Control>w"])
+        add("close-tab", self.close_current, ["<Primary>w"])
         add("import-winscp", lambda: self.import_winscp(self))
         add("toggle-queue", lambda: self.queue_btn.set_active(not self.queue_btn.get_active()),
-            ["<Control>j"])
-        add("shortcuts", self.show_shortcuts, ["<Control>question", "<Control>F1"])
+            ["<Primary>j"])
+        add("shortcuts", self.show_shortcuts, ["<Primary>question", "<Primary>F1"])
         for name, accels in PAGE_ACTIONS.items():
             add(name, lambda n=name: self._page_action(n), accels)
 
@@ -196,7 +196,7 @@ class MainWindow(Adw.ApplicationWindow):
             action = Gio.SimpleAction.new_stateful(name, None, GLib.Variant.new_boolean(bool(self.settings[key])))
             action.connect("change-state", self._on_toggle_setting, key)
             self.add_action(action)
-        app.set_accels_for_action("win.show-hidden", ["<Control>h"])
+        app.set_accels_for_action("win.show-hidden", ["<Primary>h"])
         self.settings.connect(self._on_setting)
         self.update_actions()
 

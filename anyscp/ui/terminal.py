@@ -6,6 +6,7 @@ connection — no second login needed."""
 from __future__ import annotations
 
 import shlex
+import sys
 import threading
 
 import gi
@@ -17,7 +18,11 @@ try:
 except (ValueError, ImportError):  # pragma: no cover - optional dependency
     Vte = None
 
+from ..compat import shortcut_label
 from .prompts import show_error
+
+# On macOS ⌘C/⌘V copy and paste (Ctrl+C stays the shell's, as ⌘ is not Ctrl there).
+MAC_PLAIN = "|<Primary>{}" if sys.platform == "darwin" else ""
 
 PALETTE_DARK = ["#241f31", "#c01c28", "#2ec27e", "#f5c211", "#1e78e4", "#9841bb", "#0ab9dc", "#c0bfbc",
                 "#5e5c64", "#ed333b", "#57e389", "#f8e45c", "#51a1ff", "#c061cb", "#4fd2fd", "#f6f5f4"]
@@ -44,9 +49,9 @@ class TerminalWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         self.title_widget = Adw.WindowTitle(title=page.title, subtitle="Terminal")
         header.set_title_widget(self.title_widget)
-        copy_btn = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy (Ctrl+Shift+C)")
+        copy_btn = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text=shortcut_label("Copy (Ctrl+Shift+C)"))
         copy_btn.connect("clicked", lambda *_a: self.term.copy_clipboard_format(Vte.Format.TEXT))
-        paste_btn = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste (Ctrl+Shift+V)")
+        paste_btn = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text=shortcut_label("Paste (Ctrl+Shift+V)"))
         paste_btn.connect("clicked", lambda *_a: self.term.paste_clipboard())
         header.pack_start(copy_btn)
         header.pack_start(paste_btn)
@@ -72,10 +77,10 @@ class TerminalWindow(Adw.ApplicationWindow):
         self.set_content(view)
 
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.MANAGED)
-        keys.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control><Shift>c"),
+        keys.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Primary><Shift>c" + MAC_PLAIN.format("c")),
                                        action=Gtk.CallbackAction.new(
                                            lambda *_a: (self.term.copy_clipboard_format(Vte.Format.TEXT), True)[1])))
-        keys.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control><Shift>v"),
+        keys.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Primary><Shift>v" + MAC_PLAIN.format("v")),
                                        action=Gtk.CallbackAction.new(
                                            lambda *_a: (self.term.paste_clipboard(), True)[1])))
         self.add_controller(keys)

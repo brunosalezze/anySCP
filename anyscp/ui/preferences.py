@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from gi.repository import Adw, GLib, Gtk, Pango
 
+from ..compat import shortcut_label
 from ..config import CONFIG_DIR, PORTABLE, secrets
 
 
@@ -50,7 +51,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         general.add(look)
 
         panes = Adw.PreferencesGroup(title="File Lists")
-        panes.add(_switch("Show hidden files", "Files starting with a dot (Ctrl+H)", s, "show_hidden"))
+        panes.add(_switch("Show hidden files", shortcut_label("Files starting with a dot (Ctrl+H)"), s, "show_hidden"))
         panes.add(_switch("Folders first", None, s, "dirs_first"))
         panes.add(_combo("File sizes", None, [("human", "Human readable (4.2 MB)"), ("bytes", "Bytes")],
                          s, "size_format"))

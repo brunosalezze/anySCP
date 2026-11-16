@@ -36,6 +36,8 @@ def _portable_dir() -> Path | None:
     candidate = Path(launcher) / "anySCP-data"
     if candidate.is_dir():
         return candidate                      # an existing folder always wins
+    if sys.platform == "darwin":
+        return None                           # (next to an app, usually in /Applications: only if made by hand)
     if os.environ.get("ANYSCP_PORTABLE", "1").strip().lower() in ("0", "no", "false", "off"):
         return None
     try:
@@ -60,6 +62,9 @@ def _default_dirs() -> tuple[Path, Path]:
         roaming = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
         local = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
         return roaming / "anySCP", local / "anySCP" / "cache"
+    if sys.platform == "darwin":
+        library = Path.home() / "Library"
+        return library / "Application Support" / "anySCP", library / "Caches" / "anySCP"
     return _xdg("XDG_CONFIG_HOME", ".config") / "anyscp", _xdg("XDG_CACHE_HOME", ".cache") / "anyscp"
 
 
@@ -547,28 +552,59 @@ class _WinCredentials:
         self.CredDelete(self._target(site_id), 1, 0)
 
 
+class _MacKeychain:
+    """The login keychain, through the keyring package's macOS backend."""
+
+    SERVICE = "anySCP"
+
+    def __init__(self):
+        from keyring.backends import macOS
+        self._keychain = macOS.Keyring()
+
+    def store(self, site_id: str, label: str, password: str) -> bool:
+        self._keychain.set_password(self.SERVICE, site_id, password)
+        return True
+
+    def lookup(self, site_id: str) -> str | None:
+        return self._keychain.get_password(self.SERVICE, site_id)
+
+    def clear(self, site_id: str) -> None:
+        try:
+            self._keychain.delete_password(self.SERVICE, site_id)
+        except Exception:  # noqa: BLE001 - nothing stored
+            pass
+
+
 class _Secrets:
     """Password storage: GNOME Keyring / KWallet via libsecret on Linux,
-    Credential Manager on Windows.  Falls back to in-memory storage when
-    neither is available so the app keeps working."""
+    Credential Manager on Windows, the Keychain on macOS.  Falls back to
+    in-memory storage when neither is available so the app keeps working."""
 
     def __init__(self):
         self._lock = threading.Lock()
         self._memory: dict[str, str] = {}
         self._schema = None
         self._secret = None
-        self._win = None
+        self._native = None
         self.available = False
         self.backend_name = "memory"
         if os.environ.get("ANYSCP_NO_KEYRING"):
             return
+        if sys.platform == "darwin":
+            try:
+                self._native = _MacKeychain()
+                self.available = True
+                self.backend_name = "macOS Keychain"
+            except Exception:  # noqa: BLE001 - no keyring package, no Security framework
+                self._native = None
+            return
         if sys.platform == "win32":
             try:
-                self._win = _WinCredentials()
+                self._native = _WinCredentials()
                 self.available = True
                 self.backend_name = "Windows Credential Manager"
             except (OSError, AttributeError):
-                self._win = None
+                self._native = None
             return
         try:
             import gi
@@ -589,8 +625,8 @@ class _Secrets:
         if not self.available:
             return False
         try:
-            if self._win is not None:
-                return self._win.store(site_id, label, password)
+            if self._native is not None:
+                return self._native.store(site_id, label, password)
             return bool(self._secret.password_store_sync(
                 self._schema, {"site-id": site_id}, self._secret.COLLECTION_DEFAULT,
                 f"anySCP password for {label}", password, None))
@@ -604,8 +640,8 @@ class _Secrets:
         if not self.available:
             return None
         try:
-            if self._win is not None:
-                value = self._win.lookup(site_id)
+            if self._native is not None:
+                value = self._native.lookup(site_id)
             else:
                 value = self._secret.password_lookup_sync(self._schema, {"site-id": site_id}, None)
         except Exception:  # noqa: BLE001
@@ -621,8 +657,8 @@ class _Secrets:
         if not self.available:
             return
         try:
-            if self._win is not None:
-                self._win.clear(site_id)
+            if self._native is not None:
+                self._native.clear(site_id)
             else:
                 self._secret.password_clear_sync(self._schema, {"site-id": site_id}, None)
         except Exception:  # noqa: BLE001

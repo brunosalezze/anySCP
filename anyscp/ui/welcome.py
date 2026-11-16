@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from gi.repository import Adw, GLib, Gtk
 
+from ..compat import shortcut_label
 from ..config import APP_ID, site_from_url, site_subtitle, site_title
 from ..utils import color_dot_icon
 from .site_dialog import PROTOCOL_ICONS
@@ -59,7 +60,7 @@ class WelcomePage(Gtk.ScrolledWindow):
         self.search = Gtk.SearchEntry(placeholder_text="Search", width_chars=14)
         self.search.connect("search-changed", lambda *_a: self.listbox.invalidate_filter())
         header.append(self.search)
-        new = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New site (Ctrl+N)")
+        new = Gtk.Button(icon_name="list-add-symbolic", tooltip_text=shortcut_label("New site (Ctrl+N)"))
         new.add_css_class("flat")
         new.set_action_name("win.new-session")
         header.append(new)
