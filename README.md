@@ -75,6 +75,7 @@ import your saved WinSCP sites.
 |---|---|
 | ![Dark mode](docs/screenshots/dark.png) | ![Site manager](docs/screenshots/sites.png) |
 | ![Synchronize preview](docs/screenshots/sync.png) | ![Terminal](docs/screenshots/terminal.png) |
+| ![Start page with the saved sites](docs/screenshots/welcome.png) | ![Built-in editor](docs/screenshots/editor.png) |
 
 ## Download and run (portable, nothing to install)
 
@@ -95,7 +96,8 @@ there, so you can carry anySCP on a USB stick. If that location isn't writable,
 the normal per-user folders are used instead. Set `ANYSCP_PORTABLE=0` to always
 use the per-user folders. Saved passwords stay in the system keyring or
 Windows Credential Manager of each computer, never in the folder. See
-[packaging/README.md](packaging/README.md) to build them yourself.
+[packaging/README.md](packaging/README.md) to build them yourself, and
+[CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) for the code signing policy of the Windows programs.
 
 ### Running from a network share (SMB/NFS)
 
@@ -219,6 +221,9 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/pip install pytest pyftpdlib pyopenssl wsgidav cheroot
 .venv/bin/python -m pytest -q
 ```
+
+The screenshots in `docs/screenshots` are made by `python3 docs/screenshots/generate.py`
+(a demo site on a local test server, under Xvfb; needs the AppImage build's runtime).
 
 ## Not (yet) supported
 

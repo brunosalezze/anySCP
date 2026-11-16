@@ -5,6 +5,9 @@ that need a password login, e.g. one stored in the system's password store.
 
 usage: sftp_server.py <root dir> <user> <password> <info.json> [delay]
 
+With ANYSCP_DEMO_SHELL set (the documentation screenshots), a shell session
+prints that text (a canned "ls -l" and a prompt) instead of failing.
+
 Serves <root dir> as "/" on 127.0.0.1, on a free port, until killed.  Writes
 {"port": ..., "known_hosts": "<line for a known_hosts file>"} to <info.json>
 once it accepts connections.
@@ -24,6 +27,8 @@ from paramiko import (AUTH_FAILED, AUTH_SUCCESSFUL, OPEN_FAILED_ADMINISTRATIVELY
 
 ROOT, USER, PASSWORD, INFO = os.path.realpath(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
 DELAY = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0   # seconds: answer like a distant server
+DEMO_SHELL = os.environ.get("ANYSCP_DEMO_SHELL", "")
+READ_DELAY = float(os.environ.get("ANYSCP_DEMO_READ_DELAY", "0"))   # seconds per read request
 
 
 class Server(paramiko.ServerInterface):
@@ -37,12 +42,35 @@ class Server(paramiko.ServerInterface):
     def check_channel_request(self, kind, chanid):
         return OPEN_SUCCEEDED if kind == "session" else OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
 
+    # a pretend shell, for the screenshots of the terminal
+    def check_channel_pty_request(self, channel, term, width, height, pixelwidth, pixelheight, modes):
+        return bool(DEMO_SHELL)
+
+    def check_channel_shell_request(self, channel):
+        if not DEMO_SHELL:
+            return False
+
+        def talk():
+            channel.sendall(DEMO_SHELL.replace("\n", "\r\n").encode())
+            try:
+                while channel.recv(1024):
+                    pass
+            except OSError:
+                pass
+        threading.Thread(target=talk, daemon=True).start()
+        return True
+
 
 def _errno(exc):
     return SFTPServer.convert_errno(exc.errno)
 
 
 class Handle(SFTPHandle):
+    def read(self, offset, length):
+        if READ_DELAY:
+            time.sleep(READ_DELAY)
+        return super().read(offset, length)
+
     def stat(self):
         try:
             return SFTPAttributes.from_stat(os.fstat((self.readfile or self.writefile).fileno()))
