@@ -17,6 +17,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+New-Item -ItemType Directory -Force -Path $Work | Out-Null
 
 # Keep the machine awake while this runs (installing and testing take a while)
 Add-Type -Namespace Win32 -Name Power -MemberDefinition @'
@@ -97,6 +98,7 @@ try {
                      Where-Object { $_ } | Select-Object -Unique) -join " | "
         Write-Output ("  {0,-8} {1}{2}" -f $result, $test.NAME, $(if ($messages -and $result -ne "PASS") { " -- $messages" } else { "" }))
     }
+    if ($xml.REPORT.OVERALL_RESULT -ne "PASS") { $failed = $true }
 } finally {
     # nothing of the test certificate stays trusted or installed
     if ($trusted) { Remove-Item "Cert:\LocalMachine\TrustedPeople\$($trusted.Thumbprint)" -ErrorAction SilentlyContinue }
@@ -104,3 +106,4 @@ try {
     Remove-Item $pfx, $cer -ErrorAction SilentlyContinue
     Get-AppxPackage -Name $identity.Name -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
 }
+if ($failed) { exit 1 }

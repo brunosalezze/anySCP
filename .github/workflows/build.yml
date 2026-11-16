@@ -94,6 +94,14 @@ jobs:
           packaging/windows/build.sh
           packaging/windows/build.sh arm64
 
+      - name: Microsoft Store package layouts (MSIX)
+        run: |
+          mkdir -p msix-layouts
+          for arch in x64 arm64; do
+              packaging/windows/msix/make_layout.sh "$arch"
+              tar -C build/msix -czf "msix-layouts/msix-layout-$arch.tar.gz" "$arch/layout"
+          done
+
       - name: Checksums
         run: |
           cd dist
@@ -104,6 +112,58 @@ jobs:
           name: anySCP-${{ github.sha }}
           path: dist/*
           if-no-files-found: error
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: msix-layouts-${{ github.sha }}
+          path: msix-layouts/*
+          if-no-files-found: error
+          retention-days: 2
+
+  # The Microsoft Store packages (MSIX), packed by the Windows SDK's makeappx:
+  # unsigned, the Store signs them.  The x64 one also goes through the
+  # Windows App Certification Kit, as in the Store's certification.
+  msix:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: msix-layouts-${{ github.sha }}
+          path: msix
+
+      - name: Pack the MSIX packages (x64, arm64)
+        shell: pwsh
+        run: |
+          $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter makeappx.exe |
+              Where-Object FullName -like "*\x64\*" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $makeappx) { throw "makeappx.exe not found" }
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          foreach ($arch in "x64", "arm64") {
+              tar -xzf "msix/msix-layout-$arch.tar.gz" -C msix
+              [xml]$manifest = Get-Content "msix/$arch/layout/AppxManifest.xml"
+              $msix = "out/anySCP_$($manifest.Package.Identity.Version)_$arch.msix"
+              & $makeappx.FullName pack /o /d "msix/$arch/layout" /p $msix | Select-Object -Last 2
+              if ($LASTEXITCODE) { throw "makeappx failed for $arch" }
+          }
+          Get-ChildItem out | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
+
+      - name: Windows App Certification Kit (x64 package)
+        shell: pwsh
+        run: |
+          packaging/windows/msix/wack.ps1 -Layout "$PWD\msix\x64\layout" -Work "$env:RUNNER_TEMP\wack"
+          Copy-Item "$env:RUNNER_TEMP\wack\wack-report.xml" out/wack-report-x64.xml
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: anySCP-msix-${{ github.sha }}
+          path: out/*
+          if-no-files-found: warn
           retention-days: 30
 
   # macOS, Apple Silicon only.  Experimental: built and self-tested on
