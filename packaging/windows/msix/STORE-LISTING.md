@@ -47,10 +47,18 @@ Upload both .msix files. Device family: Windows 10/11 Desktop.
 - Background transfers with progress, speed, cancel and retry
 - Folder synchronization with a preview of every change
 - Built-in editor for remote files, or open them in any program
-- SSH jump hosts in series, SOCKS and HTTP proxies
+- SSH jump hosts in series, each with its own login and proxy
+- SOCKS and HTTP proxies
 - Saved sites with folders and colors; imports sites from WinSCP
 - Passwords in the Windows Credential Manager
 - Light and dark appearance
+
+**What's new in this version** (1.1.0; from CHANGELOG.md)
+
+> - Jump hosts with their own settings: user, password, private key and passphrase, proxy.
+> - Saved passwords and key passphrases for every machine in the chain, used automatically.
+> - See each machine of the connection, from top to bottom, while connecting.
+> - Double-click a saved site to log in; click empty space to clear the selection.
 
 **Keywords**: sftp, scp, ftp, webdav, ssh, file transfer, file manager
 

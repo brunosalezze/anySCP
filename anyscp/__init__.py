@@ -2,4 +2,4 @@
 # Copyright (C) 2026 anySCP contributors
 """anySCP – a WinSCP-style SFTP/SCP/FTP/WebDAV client for Linux, Windows and macOS (GTK 4 + libadwaita)."""
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

@@ -63,10 +63,13 @@ import your saved WinSCP sites.
   can't be opened (renamed, mistyped), anySCP opens your home folder instead and says why
 - Passwords are stored in the **GNOME Keyring** (libsecret), never in plain text
 - SSH host key checks against `~/.ssh/known_hosts` and anySCP's own cache, with clear warnings for unknown or changed keys
-- Authentication by public key (OpenSSH keys, with a passphrase prompt), the SSH agent, password, or keyboard-interactive (2FA/OTP)
+- Authentication by public key (OpenSSH keys; the passphrase can be remembered), the SSH agent, password, or keyboard-interactive (2FA/OTP)
 - **Jump hosts** for SFTP and SCP sites: connect through one or more SSH servers in series, like `ssh -J`.
-  A jump host can be a saved site (it logs in with its own user, key and password) or `user@host:port`
-- **Proxy** per site: SOCKS5 (with or without a login), SOCKS4/4a or HTTP (`CONNECT`), for every protocol
+  Each jump host has its own login (user, password, private key and passphrase, all of which can be
+  remembered) and its own proxy. While connecting, the session shows each machine of the way and how
+  far the connection got
+- **Proxy** per site and per jump host: SOCKS5 (with or without a login), SOCKS4/4a or HTTP (`CONNECT`).
+  A jump host's proxy reaches that jump host; the site's proxy reaches the server, through the jump hosts if any
 - Host aliases from `~/.ssh/config` (HostName, User, Port, IdentityFile, ProxyCommand), and its `ProxyJump`
   jump hosts, through anySCP's own connections (no `ssh` program needed)
 - TLS certificates are verified against the system CA store; an untrusted certificate prompts you to trust it once or always
@@ -81,15 +84,16 @@ import your saved WinSCP sites.
 ## Download and run (portable, nothing to install)
 
 Download the file for your system from the
-[Releases page](https://github.com/brunosalezze/anySCP/releases).
+[Releases page](https://github.com/brunosalezze/anySCP/releases). What changed in each
+version: [CHANGELOG.md](CHANGELOG.md).
 
 | Platform | File | How to run |
 |---|---|---|
-| Linux (x86-64, glibc ≥ 2.28) | `anySCP-1.0.0-x86_64.AppImage` | `chmod +x anySCP-*.AppImage && ./anySCP-*.AppImage` |
-| Linux (arm64: Raspberry Pi 4/5 with a 64-bit OS, ARM servers; glibc ≥ 2.28) | `anySCP-1.0.0-aarch64.AppImage` | the same |
-| Windows 10/11 (x64) | `anySCP-1.0.0-windows-x64.exe` | Double-click. The first start takes a little longer while it unpacks itself. |
-| Windows 11 on ARM (Snapdragon PCs, Surface Pro X/11) | `anySCP-1.0.0-windows-arm64.exe` | the same |
-| macOS 11 or newer on Apple Silicon (M1 and later), **experimental** | `anySCP-1.0.0-macos-arm64.dmg` | Open it and drag anySCP to Applications; the first start needs your approval, see below. |
+| Linux (x86-64, glibc ≥ 2.28) | `anySCP-1.1.0-x86_64.AppImage` | `chmod +x anySCP-*.AppImage && ./anySCP-*.AppImage` |
+| Linux (arm64: Raspberry Pi 4/5 with a 64-bit OS, ARM servers; glibc ≥ 2.28) | `anySCP-1.1.0-aarch64.AppImage` | the same |
+| Windows 10/11 (x64) | `anySCP-1.1.0-windows-x64.exe` | Double-click. The first start takes a little longer while it unpacks itself. |
+| Windows 11 on ARM (Snapdragon PCs, Surface Pro X/11) | `anySCP-1.1.0-windows-arm64.exe` | the same |
+| macOS 11 or newer on Apple Silicon (M1 and later), **experimental** | `anySCP-1.1.0-macos-arm64.dmg` | Open it and drag anySCP to Applications; the first start needs your approval, see below. |
 
 Each one includes Python, GTK 4.24, libadwaita 1.10 and every other dependency.
 (Windows on ARM can also run the x64 build, emulated; the arm64 one runs natively and is faster.)

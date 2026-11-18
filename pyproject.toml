@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anyscp"
-version = "1.0.0"
+version = "1.1.0"
 description = "WinSCP-style SFTP/SCP/FTP(S)/WebDAV client for Linux and Windows built with GTK 4 and libadwaita"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
