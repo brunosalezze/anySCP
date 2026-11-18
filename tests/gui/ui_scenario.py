@@ -389,60 +389,242 @@ def test_relative_remote_dir(app):
 
 
 def test_proxy_and_jump_site(app):
-    """A site with a SOCKS5 proxy and a jump host, made in the site dialog:
-    Log In goes through both, and both are saved with the site."""
+    """A site with two jump hosts, made in the site dialog: the first is
+    reached through a SOCKS5 proxy, each logs in with its own settings.
+    Log In goes through them all, and they are saved with the site."""
     from anyscp.backends.proxy import PROXY_TYPES
+    from anyscp.config import new_site
     win = app.window
     ssh, proxy = P["ssh"], P["proxy"]
-    jump = f"{ssh['user']}@127.0.0.1:{ssh['port']}"
     dlg = SiteDialog(win, select_new=True)
     dlg.present(win)
     wait(0.6)
-    dlg.name_row.set_text("Through a jump host")
+    dlg.name_row.set_text("Through jump hosts")
     dlg.host_row.set_text(ssh["host"])
     dlg.port_row.set_value(ssh["port"])
     dlg.user_row.set_text(ssh["user"])
     dlg.auth_row.set_selected(AUTH_MODES.index("key"))
-    dlg._set_key(ssh["key"])
+    dlg._set_key(ssh["key_enc"])                        # its passphrase left empty: asked at login
+    dlg.save_pw_row.set_active(True)
     dlg.remote_dir_row.set_text(P["remote_dir"])
-    dlg.proxy_type_row.set_selected(PROXY_TYPES.index("socks5"))
-    dlg.proxy_host_row.set_text("127.0.0.1")
-    dlg.proxy_port_row.set_value(proxy["port"])
-    dlg.jump_row.set_text(jump)
-    dlg.proxy_expander.set_expanded(True)
-    dlg.jump_expander.set_expanded(True)
+    step("jumps: a new site has no jump hosts", not dlg.jump_rows and dlg.no_jumps_row.get_visible())
+    dlg.add_jump_btn.emit("clicked")
+    first = dlg.jump_rows[-1] if dlg.jump_rows else None
+    step("jumps: Add adds a jump host, opened", first is not None and first.get_expanded())
+    step("jumps: ... with the usual defaults (port 22, proxy port 1080, password remembered)",
+         first and (first.read()["port"], first.read()["proxy_port"], first.read()["save_password"] or not
+                    first.save_pw_row.get_sensitive()) == (22, 1080, True), first and first.read())
+    first.host_row.set_text(f"{ssh['user']}@127.0.0.1:{ssh['port']}")      # user@host:port in one go
+    first.auth_row.set_selected(AUTH_MODES.index("key"))
+    first.set_key(ssh["key"])
+    first.proxy_type_row.set_selected(PROXY_TYPES.index("socks5"))
+    first.proxy_host_row.set_text("127.0.0.1")
+    first.proxy_port_row.set_value(proxy["port"])
+    second = dlg.add_jump(expand=True)
+    second.host_row.set_text("localhost")
+    second.port_row.set_value(ssh["port"])
+    second.user_row.set_text(ssh["user"])
+    second.auth_row.set_selected(AUTH_MODES.index("key"))
+    second.set_key(ssh["key_enc"])                      # its passphrase typed in the form: never asked
+    second.passphrase_row.set_text(ssh["key_passphrase"])
+    second.save_pw_row.set_active(True)                 # (off by default without a system keyring)
+    step("jumps: a jump host's key has a passphrase field, and Remember covers it",
+         second.passphrase_row.get_visible() and second.save_pw_row.get_visible()
+         and "passphrase" in second.save_pw_row.get_title())
+    third = dlg.add_jump()
+    third.host_row.set_text("removed.example.com")
+    dlg.remove_jump(third)
+    step("jumps: a jump host can be removed again", dlg.jump_rows == [first, second], len(dlg.jump_rows))
+    dlg.move_jump(second, -1)
+    dlg.move_jump(first, -1)
+    step("jumps: ... and moved", dlg.jump_rows == [first, second]
+         and first.get_title() == "Jump host 1" and second.get_title() == "Jump host 2",
+         [r.get_title() for r in dlg.jump_rows])
+    first.set_expanded(False)
     wait(0.5)
     scroller = next((w for w in all_widgets(dlg.page) if isinstance(w, Gtk.ScrolledWindow)), None)
     if scroller is not None:
         adj = scroller.get_vadjustment()
         adj.set_value(adj.get_upper())
         wait(0.4)
-    screenshot(dlg, "site-dialog-proxy-jump.png")
-    step("proxy + jump: the dialog sums the settings up",
-         f"SOCKS5 · 127.0.0.1:{proxy['port']}" in dlg.proxy_expander.get_subtitle()
-         and jump in dlg.jump_expander.get_subtitle(),
-         (dlg.proxy_expander.get_subtitle(), dlg.jump_expander.get_subtitle()))
+    screenshot(dlg, "site-dialog-jump-hosts.png")
+    step("jumps: each row sums its jump host up",
+         f"{ssh['user']}@127.0.0.1:{ssh['port']}" in first.get_subtitle()
+         and f"via SOCKS5 127.0.0.1" in first.get_subtitle()
+         and f"{ssh['user']}@localhost:{ssh['port']}" in second.get_subtitle(),
+         (first.get_subtitle(), second.get_subtitle()))
     dlg.login_btn.emit("clicked")
     page = win.current_page()
-    ok = page is not None and spin(lambda: page.session.state == "connected" and page.remote_pane is not None
-                                   and "small.txt" in names(page.remote_pane), 60)
-    step("proxy + jump: Log In connects and lists the server", ok, page and describe(page))
+    # (the test's known hosts have no key for "localhost" yet)
+    spin(lambda: page is None or page.session.state != "connecting"
+         or isinstance(win.get_visible_dialog(), Adw.AlertDialog), 30)
+    if page is not None and page.session.state == "connecting":
+        stages = [(st["title"], st["state"]) for st in page.session.stages]
+        wait(0.5)
+        screenshot(win, "connecting-progress.png")
+        step("jumps: while connecting, each machine of the way is listed, top to bottom",
+             [state for _t, state in stages] == ["done", "active", "waiting"]
+             and len(page.connect_progress._rows) == 3
+             and page.connect_progress._rows[1].mark.get_visible_child_name() == "active"
+             and page.connect_progress._rows[0].shown > 2, stages)
+    heading = answer_dialog(win, "once", timeout=1) if page and page.session.state == "connecting" else None
+    step("jumps: the second jump host's key is checked, like any server's", heading == "Unknown Server", heading)
+    asked = []
+
+    def answer_passphrase():
+        dialog = win.get_visible_dialog()
+        if isinstance(dialog, Adw.AlertDialog) and dialog.get_heading() == "Key passphrase":
+            asked.append(dialog.get_body())
+            entry = next(w for w in all_widgets(dialog) if isinstance(w, Gtk.Text))
+            entry.set_text(ssh["key_passphrase"])
+            dialog.emit("response", "ok")
+            dialog.force_close()
+        return page.session.state == "connected" and page.remote_pane is not None \
+            and "small.txt" in names(page.remote_pane) or page.session.state == "failed"
+    ok = page is not None and spin(answer_passphrase, 60) and page.session.state == "connected"
+    step("jumps: Log In connects and lists the server", ok, page and describe(page))
     if page is None:
         return
+    step("jumps: only the site's key passphrase was asked (the jump host's came from its field)",
+         len(asked) == 1, asked)
+    stages = page.session.stages
+    step("jumps: when connected, every machine of the way is ticked off",
+         [st["state"] for st in stages] == ["done"] * 3
+         and [st["title"] for st in stages] == [f"{ssh['user']}@127.0.0.1:{ssh['port']}",
+                                                f"{ssh['user']}@localhost:{ssh['port']}",
+                                                f"{ssh['user']}@{ssh['host']}:{ssh['port']}"]
+         and "through the SOCKS5 proxy" in stages[0]["role"] and stages[1]["role"] == "Jump host 2"
+         and stages[2]["role"] == "SFTP server"
+         and any("Authenticated" in e for e in stages[2]["events"]),
+         [(st["title"], st["role"], st["state"], len(st["events"])) for st in stages])
     with open(proxy["targets"], encoding="utf-8") as fh:
         targets = fh.read().split()
-    step("proxy + jump: the proxy carried the connection to the jump host",
+    log = page.session.log_lines
+    step("jumps: the first jump host's proxy carried the connection to it",
          f"127.0.0.1:{ssh['port']}" in targets, targets)
-    step("proxy + jump: ... and the jump host the one to the site",
-         any(f"Opening a tunnel through 127.0.0.1 to {ssh['host']}:{ssh['port']}" in line
-             for line in page.session.log_lines), page.session.log_lines[-8:])
+    step("jumps: ... it the one to the second jump host, and that one the one to the site",
+         any(f"Opening a tunnel through 127.0.0.1 to localhost:{ssh['port']}" in line for line in log)
+         and any(f"Opening a tunnel through localhost to {ssh['host']}:{ssh['port']}" in line for line in log),
+         log[-10:])
     saved = app.sites.get(page.site["id"]) or {}
-    step("proxy + jump: both are saved with the site",
-         (saved.get("proxy_type"), saved.get("proxy_host"), saved.get("proxy_port"), saved.get("jump_hosts"))
-         == ("socks5", "127.0.0.1", proxy["port"], jump),
-         {k: saved.get(k) for k in ("proxy_type", "proxy_host", "proxy_port", "jump_hosts")})
+    hops = saved.get("jumps") or []
+    step("jumps: they are saved with the site, in order",
+         [(h.get("host"), h.get("port"), h.get("user"), h.get("proxy_type")) for h in hops]
+         == [("127.0.0.1", ssh["port"], ssh["user"], "socks5"), ("localhost", ssh["port"], ssh["user"], "none")]
+         and saved.get("proxy_type") == "none", hops)
     win.close_page(page, force=True)
     spin(lambda: page not in win.pages(), 10)
+
+    # again from the saved site: the passphrases are applied by themselves
+    from anyscp.config import jump_secret_id, key_secret_id, secrets
+    step("jumps: the passphrases are remembered (the site's typed at login, the jump host's from the form)",
+         secrets.lookup(key_secret_id(saved["id"])) == ssh["key_passphrase"]
+         and secrets.lookup(jump_secret_id(saved["id"], hops[1]["id"], key=True)) == ssh["key_passphrase"],
+         (bool(secrets.lookup(key_secret_id(saved["id"]))),
+          bool(secrets.lookup(jump_secret_id(saved["id"], hops[1]["id"], key=True))), hops[1].get("save_password")))
+    # reopened as after a restart: nothing in memory but the password store
+    saved = {k: v for k, v in saved.items() if not k.startswith("_")}
+    saved["jumps"] = [{k: v for k, v in h.items() if not k.startswith("_")} for h in saved["jumps"]]
+    win.open_session(dict(saved))
+    page = win.current_page()
+    prompts = []
+
+    def connected_without_asking():
+        dialog = win.get_visible_dialog()
+        if isinstance(dialog, Adw.AlertDialog):
+            prompts.append(dialog.get_heading())
+            dialog.emit("response", "once" if dialog.get_heading() == "Unknown Server" else "cancel")
+            dialog.force_close()
+        return page.session.state in ("connected", "failed") and (
+            page.session.state == "failed" or page.remote_pane is not None and "small.txt" in names(page.remote_pane))
+    ok = spin(connected_without_asking, 60) and page.session.state == "connected"
+    step("jumps: the saved site connects again without asking for any password or passphrase",
+         ok and not [h for h in prompts if h != "Unknown Server"], (prompts, describe(page)))
+    win.close_page(page, force=True)
+    spin(lambda: page not in win.pages(), 10)
+
+    # a chain that breaks: the page shows which machine failed
+    from anyscp.config import new_jump
+    broken = app.sites.upsert(new_site(name="Broken chain", protocol="sftp", host="127.0.0.1",
+                                       port=9, user=ssh["user"],               # (nothing listens there)
+                                       auth="key", key_file=ssh["key"],
+                                       jumps=[new_jump(host="127.0.0.1", port=ssh["port"], user=ssh["user"],
+                                                       auth="key", key_file=ssh["key"])]))
+    win.open_session(dict(broken))
+    page = win.current_page()
+    spin(lambda: page.session.state == "failed", 30)
+    wait(0.5)
+    rows = page.error_progress._rows
+    screenshot(win, "connect-failed-progress.png")
+    step("jumps: when a chain breaks, the error page shows where",
+         page.stack.get_visible_child_name() == "error"
+         and [r.state for r in rows] == ["done", "failed"]
+         and rows[1].events.get_last_child() is not None
+         and rows[1].events.get_last_child().has_css_class("error"),
+         [(st["title"], st["state"], st["events"][-1:]) for st in page.session.stages])
+    win.close_page(page, force=True)
+    spin(lambda: page not in win.pages(), 10)
+    app.sites.delete(broken["id"])
+
+    # a site of an older version: jump hosts as text, and its proxy reaching the first
+    old = app.sites.upsert(new_site(name="Old jump site", protocol="sftp", host=ssh["host"], port=ssh["port"],
+                                    user=ssh["user"], auth="key", key_file=ssh["key"],
+                                    jump_hosts=f"{ssh['user']}@127.0.0.1:{ssh['port']}",
+                                    proxy_type="socks5", proxy_host="127.0.0.1", proxy_port=proxy["port"]))
+    win.sites_changed()
+    dlg = SiteDialog(win, old)
+    dlg.present(win)
+    wait(0.5)
+    hops = [r.read() for r in dlg.jump_rows]
+    step("jumps: an older site's jump hosts are shown as jump hosts of their own, with its proxy",
+         [(h["host"], h["port"], h["user"], h["auth"], h["key_file"], h["proxy_type"], h["proxy_port"])
+          for h in hops] == [("127.0.0.1", ssh["port"], ssh["user"], "key", ssh["key"], "socks5", proxy["port"])]
+         and PROXY_TYPES[dlg.proxy_type_row.get_selected()] == "none", hops)
+    dlg.close()
+    wait(0.3)
+
+
+def test_double_click_logs_in(app, screen, mouse, label):
+    """In the Sites dialog, a double click on a saved site logs in to it."""
+    from anyscp.config import new_site
+    win = app.window
+    ssh = P["ssh"]
+    site = app.sites.upsert(new_site(name="Double-click site", protocol="sftp", host=ssh["host"],
+                                     port=ssh["port"], user=ssh["user"], auth="key", key_file=ssh["key"],
+                                     remote_dir=P["remote_dir"]))
+    win.sites_changed()
+    dlg = SiteDialog(win, select_new=True)
+    dlg.present(win)
+    wait(0.8)
+    row = next(r for r in all_widgets(dlg.listbox) if getattr(r, "site", None) and r.site["id"] == site["id"])
+    pages = list(win.pages())
+    mouse.move(*screen(row, 0.5, 0.5))
+    wait(0.3)
+    mouse.down()
+    wait(0.05)
+    mouse.up()
+    wait(0.6)
+    step(f"{label}: a single click on a saved site only shows it",
+         dlg.current.get("id") == site["id"] and list(win.pages()) == pages and dlg.get_mapped())
+    for _ in range(2):
+        mouse.down()
+        wait(0.04)
+        mouse.up()
+        wait(0.06)
+    new = spin(lambda: len(win.pages()) > len(pages), 10 * SLOW)
+    page = win.current_page()
+    spin(lambda: not dlg.get_mapped(), 5)
+    step(f"{label}: a double click on a saved site logs in to it",
+         new and page.site.get("id") == site["id"] and not dlg.get_mapped(),
+         (len(pages), len(win.pages()), dlg.get_mapped()))
+    if new:
+        spin(lambda: page.session.state == "connected", 30)
+        win.close_page(page, force=True)
+        spin(lambda: page not in win.pages(), 10)
+    else:
+        dlg.close()
+    app.sites.delete(site["id"])
+    win.sites_changed()
 
 
 # ---------------------------------------------------------------------------- B
@@ -729,9 +911,13 @@ def test_pointer(app, page):
     step("pointer: dropping back on the same side does nothing",
          len(app.transfers.jobs) == jobs_before and FilePane._active_drag is None)
 
-    # 2. out of the window, onto another program
+    # 2. out of the window, onto another program (which also offers a file
+    # of its own to be dragged in: 3.)
     drop_out = P["drop_out"]
-    proc = subprocess.Popen(P["drop_target_cmd"] + [drop_out])
+    incoming = os.path.join(os.path.dirname(drop_out), "dragged-in.bin")
+    with open(incoming, "wb") as fh:
+        fh.write(os.urandom(180_000))
+    proc = subprocess.Popen(P["drop_target_cmd"] + [drop_out, incoming])
     try:
         def target_state():
             try:
@@ -761,6 +947,36 @@ def test_pointer(app, page):
              temp_job and temp_job.subtitle)
         screenshot(win, "drag-out.png")
         step("pointer: the drag is over", spin(lambda: FilePane._active_drag is None, 5))
+
+        # 3. into the window, from another program: onto each pane
+        source = target_state().get("source")
+        if not step("pointer: the stand-in file manager offers a file to drag", source, target_state()):
+            return
+        start_in = (tx + source[0], ty + source[1])
+        want = sha256(incoming)
+        for pane, side in ((rp, "server"), (lp, "local")):
+            pane.selection.unselect_all()
+            last = pane.sort_model.get_item(pane.sort_model.get_n_items() - 1).name
+            below = point_in(row_widget(pane, last), pane.column_view, 0.5, 1.0)[1] + 24
+            fy = below / pane.column_view.get_height() if below < pane.column_view.get_height() - 8 else 0.97
+            drop_at = screen(pane.column_view, 0.5, fy)
+            before = {j for j in app.transfers.jobs}
+            drag(start_in, [(ox + sx + win.get_width() - 30, start_in[1]), drop_at], hold=0.6)
+            spin(lambda: any(j not in before for j in app.transfers.jobs), 15)
+            new_jobs = [j for j in app.transfers.jobs if j not in before]
+            job = new_jobs[0] if new_jobs else None
+            spin(lambda: finished(job), 60)
+            dest = os.path.join(pane.path, "dragged-in.bin")       # (the test server is on this machine)
+            ok = job is not None and job.state == "done" and os.path.isfile(dest) and sha256(dest) == want
+            if not ok:
+                screenshot(win, f"drag-in-{side}.png")
+            step(f"pointer: dragging a file from another program onto the {side} pane copies it there",
+                 ok, job and (job.title, job.state, job.error, dest) or "no transfer started")
+            step(f"pointer: ... and leaves the other program's file where it was ({side})",
+                 os.path.isfile(incoming) and sha256(incoming) == want)
+            pane.load(pane.path)
+            spin(lambda: "dragged-in.bin" in names(pane), 10)
+            step(f"pointer: ... and the {side} pane shows it", "dragged-in.bin" in names(pane))
     finally:
         proc.terminate()
 
@@ -958,6 +1174,43 @@ def test_pane_features(app, page, screen, mouse, label):
     step(f"{label}: nothing stays highlighted after the drop",
          not lp.has_css_class("drop-hover") and lp._drop_row is None and not rp.has_css_class("drop-hover"))
     spin(lambda: not app.transfers.active, 30)
+
+    # 4. a click on a pane's empty space clears that pane's selection (only)
+    for pane, other in ((lp, rp), (rp, lp)):
+        side = "left" if pane is lp else "right"
+        pane.load(pane.path)
+        spin(lambda: pane.entries, 10)
+        wait(0.4)
+        last = pane.sort_model.get_item(pane.sort_model.get_n_items() - 1).name
+        below = point_in(row_widget(pane, last), pane.column_view, 0.5, 1.0)[1] + 24
+        if below >= pane.column_view.get_height() - 8:
+            step(f"{label}: (no empty space below the files of the {side} pane)", True)
+            continue
+        names = sorted(e.name for e in pane.entries if not e.is_dir)[:2]
+        other_names = sorted(e.name for e in other.entries if not e.is_dir)[:1]
+        pane.select_names(set(names))
+        other.select_names(set(other_names))
+        wait(0.3)
+        header = next((w for w in all_widgets(pane.column_view) if w.get_css_name() == "header"), None)
+        if header is not None:
+            click(screen(header, 0.9, 0.5))
+            step(f"{label}: a click on the {side} pane's column titles keeps its selection",
+                 selected(pane) == set(names), sorted(selected(pane)))
+        click(screen(pane.column_view, 0.5, below / pane.column_view.get_height()))
+        step(f"{label}: a click on the {side} pane's empty space clears its selection",
+             names and not selected(pane), sorted(selected(pane)))
+        step(f"{label}: ... and not the other pane's", selected(other) == set(other_names),
+             sorted(selected(other)))
+        click(screen(row_widget(pane, names[0]), 0.6, 0.5))
+        step(f"{label}: a click on a file of the {side} pane still selects it",
+             selected(pane) == {names[0]}, sorted(selected(pane)))
+        other.selection.unselect_all()
+    pane = lp
+    pane.column_view.sort_by_column(pane.columns["name"], Gtk.SortType.ASCENDING)
+    wait(0.3)
+
+    # 5. the Sites dialog: a double click on a saved site logs in
+    test_double_click_logs_in(app, screen, mouse, label)
 
     # in the same pane: over its own files nothing (a drop there does nothing),
     # over one of its folders that folder - and the file is moved there

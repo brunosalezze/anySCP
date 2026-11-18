@@ -194,3 +194,81 @@ Host target
     finally:
         fs.close()
     assert any("through 127.0.0.1 to localhost" in m for m in prompter.messages)
+
+
+# -- jump hosts with settings of their own (``jumps``) ------------------------
+
+def jump(sshd, **extra):
+    values = {"host": "127.0.0.1", "port": sshd["port"], "user": sshd["user"], "auth": "key",
+              "key_file": sshd["key"]}
+    return config.new_jump(**dict(values, **extra))
+
+
+def test_jumps_in_series_each_with_its_own_login(sshd):
+    site = ssh_site(sshd, "scp", host="localhost",
+                    jumps=[jump(sshd), jump(sshd, host="localhost")])
+    site["_jumps"] = config.jump_chain(site)
+    assert [h["_jump_label"] for h in site["_jumps"]] == \
+        [f"{sshd['user']}@127.0.0.1:{sshd['port']}", f"{sshd['user']}@localhost:{sshd['port']}"]
+    fs, prompter = connect(site)
+    try:
+        assert fs.listdir(sshd["root"]) is not None
+        assert len(fs.conn.jumps) == 2
+    finally:
+        fs.close()
+    tunnels = [m for m in prompter.messages if "Opening a tunnel through" in m]
+    assert len(tunnels) == 2 and "through 127.0.0.1 to localhost" in tunnels[0]
+
+
+def test_each_server_of_the_chain_is_reached_through_its_own_proxy(sshd, proxy_server):
+    """The first jump host's proxy is reached directly; the site's proxy
+    (SOCKS4a here) and the second jump host's (HTTP, with a login) through
+    the jump host before them."""
+    first, second, last = proxy_server(), proxy_server("web", "pw"), proxy_server()
+    site = ssh_site(sshd, host="localhost", proxy_type="socks4", proxy_host="127.0.0.1",
+                    proxy_port=last.port,
+                    jumps=[jump(sshd, proxy_type="socks5", proxy_host="127.0.0.1", proxy_port=first.port),
+                           jump(sshd, proxy_type="http", proxy_host="127.0.0.1", proxy_port=second.port,
+                                proxy_user="web", _proxy_password="pw")])
+    site["_jumps"] = config.jump_chain(site)
+    fs, prompter = connect(site)
+    try:
+        assert fs.listdir(sshd["root"]) is not None
+    finally:
+        fs.close()
+    assert first.targets == [("127.0.0.1", sshd["port"])]
+    assert second.targets == [("127.0.0.1", sshd["port"])]
+    assert last.targets == [("localhost", sshd["port"])]
+    assert sum("through the HTTP proxy" in m for m in prompter.messages) == 1
+
+
+def test_proxy_of_a_jump_host_that_refuses(sshd, proxy_server):
+    proxy = proxy_server("web", "pw")
+    site = ssh_site(sshd, jumps=[jump(sshd), jump(sshd, proxy_type="socks5", proxy_host="127.0.0.1",
+                                                   proxy_port=proxy.port, proxy_user="web",
+                                                   _proxy_password="wrong")])
+    site["_jumps"] = config.jump_chain(site)
+    with pytest.raises(ProxyError, match="rejected the user name or password"):
+        connect(site)
+
+
+def test_jump_chain_passwords(monkeypatch):
+    """Remembered passwords come from the password store, under the site's
+    and the jump host's ids; one typed in this session wins."""
+    stored = {config.jump_secret_id("site1", "a"): "from store",
+              config.jump_secret_id("site1", "a", proxy=True): "proxy from store"}
+    monkeypatch.setattr(config.secrets, "lookup", lambda key: stored.get(key))
+    hops = [config.new_jump(id="a", host="h1", proxy_type="socks5", proxy_host="p", proxy_user="u"),
+            config.new_jump(id="b", host="h2", _password="typed"),
+            config.new_jump(id="c", host="h3", save_password=False)]
+    chain = config.jump_chain({"id": "site1", "jumps": hops, "timeout": 7})
+    assert [(h["_password"], h["_proxy_password"]) for h in chain] == \
+        [("from store", "proxy from store"), ("typed", None), (None, None)]
+    assert all(h["timeout"] == 7 and h["protocol"] == "sftp" for h in chain)
+
+
+def test_saved_jumps_keep_no_passwords(tmp_path):
+    store = config.SiteStore(tmp_path / "sites.json")
+    store.upsert(config.new_site(host="h", jumps=[config.new_jump(host="j", _password="secret")]))
+    text = (tmp_path / "sites.json").read_text()
+    assert '"j"' in text and "secret" not in text

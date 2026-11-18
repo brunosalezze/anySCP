@@ -14,7 +14,7 @@ import configparser
 from urllib.parse import unquote
 
 from .backends.proxy import DEFAULT_PORTS as PROXY_PORTS
-from .config import default_port, new_site, secrets
+from .config import JUMP_DEFAULTS, default_port, jump_secret_id, new_jump, new_site, secrets
 
 # TFSProtocol in WinSCP's SessionData.h
 FS_PROTOCOLS = {0: "scp", 1: "sftp", 2: "sftp", 5: "ftp", 6: "webdav", 7: "s3"}
@@ -158,7 +158,16 @@ def parse_text(text: str) -> tuple[list[dict], list[str]]:
             if proto in ("sftp", "scp") and tunnel:
                 user = unquote(sec.get("TunnelUserName", "") or "").strip()
                 port = _int(sec.get("TunnelPortNumber"), 22)
-                site["jump_hosts"] = (f"{user}@" if user else "") + tunnel + (f":{port}" if port != 22 else "")
+                hop = new_jump(host=tunnel, port=port, user=user)
+                # WinSCP's proxy carries the connection to the tunnel's host
+                for key in ("proxy_type", "proxy_host", "proxy_port", "proxy_user"):
+                    hop[key] = site.pop(key, JUMP_DEFAULTS[key])
+                tunnel_password = sec.get("TunnelPassword")
+                if tunnel_password and not master:
+                    tunnel_password = decrypt_password(tunnel_password, user + tunnel)
+                    if tunnel_password:
+                        hop["_password"] = tunnel_password
+                site["jumps"] = [hop]
             elif tunnel:
                 warnings.append(f"{site['name']}: SSH tunnels work for SFTP and SCP sites only; "
                                 "its tunnel was left out.")
@@ -199,8 +208,15 @@ def store_sites(store, sites: list[dict], with_passwords: bool) -> int:
             continue
         password = site.pop("_password", None)
         site["save_password"] = bool(with_passwords and password)
+        hop_passwords = {}
+        for hop in site.get("jumps") or []:
+            hop_passwords[hop["id"]] = hop.pop("_password", None)
+            hop["save_password"] = bool(with_passwords and hop_passwords[hop["id"]])
         saved = store.upsert(site)
         if with_passwords and password:
             secrets.store(saved["id"], saved["name"], password)
+        for hop_id, hop_password in hop_passwords.items():
+            if with_passwords and hop_password:
+                secrets.store(jump_secret_id(saved["id"], hop_id), f"{saved['name']} (jump host)", hop_password)
         count += 1
     return count

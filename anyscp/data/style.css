@@ -291,3 +291,24 @@ textview.source-view {
   font-family: monospace;
   font-size: 0.9em;
 }
+
+/* how a connection is going, machine by machine (connect_progress.py) */
+.connect-progress {
+  margin-top: 6px;
+}
+.connect-rail {
+  min-width: 2px;
+  margin-bottom: 2px;
+}
+.stage-done {
+  color: var(--success-color);
+}
+.stage-failed {
+  color: var(--error-color);
+}
+.stage-waiting {
+  opacity: 0.55;
+}
+label.heading.stage-done {
+  color: inherit;
+}

@@ -129,7 +129,9 @@ class Xvfb:
 
 
 class SSHServer:
-    """Throwaway OpenSSH server (key auth) for the GUI scenario."""
+    """Throwaway OpenSSH server (key auth) for the GUI scenario.  Two client
+    keys: ``client``, and ``client_enc`` protected by PASSPHRASE."""
+    PASSPHRASE = "key pass phrase"
 
     def __init__(self):
         self.dir = Path(tempfile.mkdtemp(prefix="anyscp-share-sshd-", dir=BUILD))
@@ -138,9 +140,9 @@ class SSHServer:
 
     def __enter__(self):
         d = self.dir
-        for name in ("host", "client"):
-            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(d / name)], check=True)
-        (d / "authorized_keys").write_text((d / "client.pub").read_text())
+        for name, passphrase in (("host", ""), ("client", ""), ("client_enc", self.PASSPHRASE)):
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", passphrase, "-f", str(d / name)], check=True)
+        (d / "authorized_keys").write_text((d / "client.pub").read_text() + (d / "client_enc.pub").read_text())
         (d / "sshd_config").write_text(
             f"Port {self.port}\nListenAddress 127.0.0.1\nHostKey {d}/host\nPidFile {d}/sshd.pid\n"
             f"AuthorizedKeysFile {d}/authorized_keys\nPasswordAuthentication no\n"

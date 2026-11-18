@@ -214,7 +214,8 @@ SITE_DEFAULTS = {
     "notes": "",
     "bookmarks": [],
     "sync_browsing": False,
-    "jump_hosts": "",          # SFTP/SCP: through these SSH servers, in order (saved site names or user@host:port)
+    "jumps": [],               # SFTP/SCP: through these SSH servers, in order (JUMP_DEFAULTS each)
+    "jump_hosts": "",          # (older sites: saved site names or user@host:port, separated by commas)
     "proxy_type": "none",      # none | socks5 | socks4 | http
     "proxy_host": "",
     "proxy_port": 1080,
@@ -239,12 +240,85 @@ def normalize_site(site: dict) -> dict:
         out["port"] = int(out["port"]) or default_port(out)
     except (TypeError, ValueError):
         out["port"] = default_port(out)
+    out["jumps"] = [new_jump(**hop) for hop in out.get("jumps") or [] if isinstance(hop, dict)]
     return out
 
 
 def proxy_secret_id(site_id: str) -> str:
     """Where a site's proxy password is kept in the password store."""
     return f"{site_id}:proxy"
+
+
+# A jump host: an SSH server the connection goes through on its way to the
+# site; it logs in with its own settings, like a site of its own.
+JUMP_DEFAULTS = {
+    "id": "",
+    "host": "",
+    "port": 22,
+    "user": "",
+    "save_password": True,
+    "auth": "auto",            # auto | password | key | agent
+    "key_file": "",
+    "proxy_type": "none",      # used to reach this jump host (from the one before it, if any)
+    "proxy_host": "",
+    "proxy_port": 1080,
+    "proxy_user": "",
+}
+
+
+def new_jump(**values) -> dict:
+    hop = copy.deepcopy(JUMP_DEFAULTS)
+    hop.update(values)
+    if not hop["id"]:
+        hop["id"] = uuid.uuid4().hex[:12]
+    try:
+        hop["port"] = int(hop["port"]) or 22
+    except (TypeError, ValueError):
+        hop["port"] = 22
+    return hop
+
+
+def key_secret_id(site_id: str) -> str:
+    """Where the passphrase of a site's private key is kept."""
+    return f"{site_id}:key"
+
+
+def jump_secret_id(site_id: str, jump_id: str, proxy: bool = False, key: bool = False) -> str:
+    """Where the password of a site's jump host (or of its proxy, or its
+    key's passphrase) is kept."""
+    return f"{site_id}:jump:{jump_id}" + (":proxy" if proxy else ":key" if key else "")
+
+
+def jump_label(hop: dict) -> str:
+    target = (hop.get("host") or "").strip() or "?"
+    if ":" in target:
+        target = f"[{target}]"
+    if hop.get("user"):
+        target = f"{hop['user']}@{target}"
+    if int(hop.get("port") or 22) != 22:
+        target += f":{hop['port']}"
+    return target
+
+
+def jump_chain(site: dict) -> list[dict]:
+    """The jump hosts of a site (``jumps``), in order, as sites to log in
+    to, with their passwords and key passphrases: typed in this session
+    (``_password``, ``_key_passphrase``) or remembered in the password store."""
+    hops = []
+    for saved in site.get("jumps") or []:
+        hop = new_jump(**{k: v for k, v in saved.items() if not k.startswith("_")})
+        hop.update(protocol="sftp", timeout=site.get("timeout") or 15, keepalive=site.get("keepalive") or 0,
+                   _jump_label=jump_label(hop), _password=saved.get("_password"),
+                   _proxy_password=saved.get("_proxy_password"), _key_passphrase=saved.get("_key_passphrase"))
+        if site.get("id") and not site.get("_quick"):
+            if hop["save_password"] and hop["_password"] is None:
+                hop["_password"] = secrets.lookup(jump_secret_id(site["id"], hop["id"]))
+            if hop["save_password"] and hop["_key_passphrase"] is None and hop["key_file"]:
+                hop["_key_passphrase"] = secrets.lookup(jump_secret_id(site["id"], hop["id"], key=True))
+            if hop["proxy_type"] != "none" and hop["proxy_user"] and hop["_proxy_password"] is None:
+                hop["_proxy_password"] = secrets.lookup(jump_secret_id(site["id"], hop["id"], proxy=True))
+        hops.append(hop)
+    return hops
 
 
 def jump_hops(site: dict, sites: list[dict] | None = None) -> list[dict]:
@@ -279,7 +353,14 @@ def jump_hops(site: dict, sites: list[dict] | None = None) -> list[dict]:
                 hop["_password"] = secrets.lookup(hop["id"])
             hops.append(hop)
         return hops
-    return expand(site, (site.get("id"),))
+    hops = expand(site, (site.get("id"),))
+    # Such jump hosts don't have proxies of their own: the site's proxy
+    # carries the connection to the first of them.
+    for n, hop in enumerate(hops):
+        for key in ("proxy_type", "proxy_host", "proxy_port", "proxy_user", "_proxy_password"):
+            hop[key] = site.get(key) if n == 0 else None
+        hop["_legacy"] = True
+    return hops
 
 
 def site_title(site: dict) -> str:
@@ -448,7 +529,9 @@ class SiteStore:
             cb()
 
     def save(self) -> None:
-        clean = [{k: v for k, v in s.items() if not k.startswith("_")} for s in self.sites]
+        def strip(d):
+            return {k: v for k, v in d.items() if not k.startswith("_")}
+        clean = [dict(strip(s), jumps=[strip(h) for h in s.get("jumps") or []]) for s in self.sites]
         save_json(self.path, {"version": 1, "sites": clean})
 
     def get(self, site_id: str) -> dict | None:
@@ -468,9 +551,14 @@ class SiteStore:
 
     def delete(self, site_id: str) -> None:
         self._reload()
+        old = self.get(site_id)
         self.sites = [s for s in self.sites if s["id"] != site_id]
         secrets.clear(site_id)
         secrets.clear(proxy_secret_id(site_id))
+        secrets.clear(key_secret_id(site_id))
+        for hop in (old or {}).get("jumps") or []:
+            for kind in ({}, {"proxy": True}, {"key": True}):
+                secrets.clear(jump_secret_id(site_id, hop.get("id", ""), **kind))
         self._changed()
 
     def sorted(self) -> list[dict]:

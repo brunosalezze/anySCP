@@ -925,9 +925,25 @@ class FilePane(Gtk.Box):
         # Drops are taken by the window, which hands them to drop_internal()
         # or drop_external() of the pane under the pointer (see window.py).
 
-    def _on_list_press(self, _gesture, _n_press, x, y):
+    def _on_list_press(self, gesture, n_press, x, y):
         if self._item_at(x, y)[1] is not None:
             self.column_view.set_enable_rubberband(False)
+        elif n_press == 1 and self._is_blank(x, y):
+            # A plain click on the list's empty space (not on a file, nor
+            # on the column titles) clears the selection, as in Explorer.
+            state = gesture.get_current_event_state()
+            if not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
+                self.selection.unselect_all()
+
+    def _is_blank(self, x, y) -> bool:
+        widget = self.column_view.pick(x, y, Gtk.PickFlags.DEFAULT)
+        if widget is None:
+            return False
+        while widget is not None and widget is not self.column_view:
+            if widget.get_css_name() in ("row", "header"):
+                return False
+            widget = widget.get_parent()
+        return widget is self.column_view
 
     def _restore_rubberband(self):
         def restore():

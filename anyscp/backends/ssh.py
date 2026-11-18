@@ -56,12 +56,18 @@ def connect_ssh(site: dict, prompter, password_holder: dict) -> SSHConnection:
     """Open, verify and authenticate an SSH transport for ``site``.
 
     Goes through the site's jump hosts first, if it has any (``_jumps``:
-    site dicts the session prepares from ``jump_hosts``; or ``ProxyJump`` in
-    ``~/.ssh/config``), each reached through the one before, like ``ssh -J``.
-    The first connection goes through the site's proxy, if it has one.
+    site dicts the session prepares from ``jumps`` or ``jump_hosts``; or
+    ``ProxyJump`` in ``~/.ssh/config``), each reached through the one
+    before, like ``ssh -J``.  Each server of the chain is reached through
+    its own proxy, if it has one: the first one directly, the others
+    through the tunnel of the jump host before them.  (Jump hosts of
+    ``jump_hosts`` and ``ProxyJump`` have no proxies of their own: the
+    site's proxy carries the connection to the first of them.)
 
-    ``password_holder`` receives ``"password"`` when a password worked, so
-    the session can offer to remember it."""
+    ``password_holder`` receives ``"password"`` when a password worked, and
+    ``"key_passphrase"`` when a key's passphrase had to be asked for, so the
+    session can remember them.  A jump host's password and passphrase that
+    worked are kept in its ``_password`` and ``_key_passphrase``."""
     if not (site.get("host") or "").strip():
         raise FSError("No host name given")
     from .sshconfig import resolve
@@ -73,25 +79,36 @@ def connect_ssh(site: dict, prompter, password_holder: dict) -> SSHConnection:
     hops = list(site.get("_jumps") or [])
     if not hops and resolved.jump_hosts:
         hops = [hop_site(spec, site) for spec in resolved.jump_hosts]
+        for key in ("proxy_type", "proxy_host", "proxy_port", "proxy_user", "_proxy_password"):
+            hops[0][key] = site.get(key)
+        for hop in hops:
+            hop["_legacy"] = True
+    legacy = any(hop.get("_legacy") for hop in hops)
     chain = [(hop, resolve(hop)) for hop in hops] + [(site, resolved)]
+    # whose proxy settings carry the connection to each server of the chain
+    proxies = list(hops) + [{} if legacy else site]
 
+    _progress(prompter, "connection_plan", [_stage_label(n, len(hops), item, proxies[n])
+                                             for n, item in enumerate(chain)])
     jumps: list[SSHConnection] = []
     try:
-        sock = _first_socket(site, chain[0][1], timeout, prompter)
+        _progress(prompter, "connection_stage", 0)
+        sock = _first_socket(proxies[0], chain[0][1], timeout, prompter)
         for n, (hop, hop_resolved) in enumerate(chain[:-1]):
+            login = hop
             if hop_resolved.identity_files and not hop.get("key_file"):
-                hop = dict(hop, _config_keys=hop_resolved.identity_files)
-            conn = _start(sock, hop, hop_resolved, _HopPrompter(prompter), {}, timeout)
+                login = dict(hop, _config_keys=hop_resolved.identity_files)
+            holder: dict = {}
+            conn = _start(sock, login, hop_resolved, _HopPrompter(prompter), holder, timeout)
             jumps.append(conn)
-            target = chain[n + 1][1]
-            prompter.log(f"Opening a tunnel through {hop_resolved.hostname} to "
-                         f"{target.hostname}:{target.port} …")
-            try:
-                sock = conn.transport.open_channel("direct-tcpip", (target.hostname, target.port),
-                                                   ("127.0.0.1", 0), timeout=timeout)
-            except (paramiko.SSHException, OSError, EOFError) as exc:
-                raise FSError(f"The jump host {hop_resolved.hostname} could not connect to "
-                              f"{target.hostname}:{target.port}: {exc}") from exc
+            if holder.get("password") is not None and holder["password"] != hop.get("_password"):
+                hop["_password"] = holder["password"]
+                hop["_password_entered"] = True
+            if holder.get("key_passphrase") is not None:
+                hop["_key_passphrase"] = holder["key_passphrase"]
+                hop["_key_passphrase_entered"] = True
+            _progress(prompter, "connection_stage", n + 1)
+            sock = _tunnel(conn, hop_resolved, chain[n + 1][1], proxies[n + 1], timeout, prompter)
         conn = _start(sock, site, resolved, prompter, password_holder, timeout)
     except BaseException:
         for jump in reversed(jumps):
@@ -101,9 +118,63 @@ def connect_ssh(site: dict, prompter, password_holder: dict) -> SSHConnection:
     return conn
 
 
-def _first_socket(site, first, timeout, prompter):
+def _progress(prompter, method, *args):
+    """Tell the session how far the connection has come (a prompter
+    without these methods, e.g. in tests, is fine)."""
+    fn = getattr(prompter, method, None)
+    if callable(fn):
+        try:
+            fn(*args)
+        except Exception:  # noqa: BLE001 - only a display
+            pass
+
+
+def _stage_label(n, hops, item, proxy_site):
+    """(title, role) of the n-th machine of the chain, for the display."""
+    from .proxy import proxy_for
+    site, resolved = item
+    target = resolved.hostname if ":" not in resolved.hostname else f"[{resolved.hostname}]"
+    if resolved.user:
+        target = f"{resolved.user}@{target}"
+    if resolved.port != 22:
+        target += f":{resolved.port}"
+    role = (f"Jump host {n + 1}" if hops > 1 else "Jump host") if n < hops else \
+        f"{(site.get('protocol') or 'sftp').upper()} server"
+    proxy = proxy_for(proxy_site) if proxy_site else None
+    if proxy is not None:
+        role += f" · through the {proxy.label}"
+    elif n == 0 and resolved.proxy_command:
+        role += " · through a proxy command"
+    return target, role
+
+
+def _tunnel(conn, via, target, proxy_site, timeout, prompter):
+    """A channel through the jump host ``conn`` (at ``via``) to the next
+    server of the chain, ``target``: direct, or through the proxy of
+    ``proxy_site`` (which the jump host connects to)."""
+    from .proxy import ProxyError, ready_proxy
+    proxy = ready_proxy(proxy_site, prompter)
+    to = (proxy.host, proxy.port) if proxy is not None else (target.hostname, target.port)
+    if proxy is None:
+        prompter.log(f"Opening a tunnel through {via.hostname} to {target.hostname}:{target.port} …")
+    else:
+        prompter.log(f"Opening a tunnel through {via.hostname} to {target.hostname}:{target.port} "
+                     f"through the {proxy.label} …")
+    try:
+        chan = conn.transport.open_channel("direct-tcpip", to, ("127.0.0.1", 0), timeout=timeout)
+    except (paramiko.SSHException, OSError, EOFError) as exc:
+        what = f"the {proxy.label}" if proxy is not None else f"{target.hostname}:{target.port}"
+        raise (ProxyError if proxy is not None else FSError)(
+            f"The jump host {via.hostname} could not connect to {what}: {exc}") from exc
+    if proxy is not None:
+        chan.settimeout(timeout)
+        proxy.handshake(chan, target.hostname, target.port)
+    return chan
+
+
+def _first_socket(proxy_site, first, timeout, prompter):
     """The connection to the first host: through its ProxyCommand (ssh
-    config) or the site's proxy, else direct."""
+    config) or the proxy of ``proxy_site``, else direct."""
     host, port = first.hostname, first.port
     if first.proxy_command:
         prompter.log(f"Connecting to {host}:{port} via proxy: {first.proxy_command}")
@@ -112,9 +183,9 @@ def _first_socket(site, first, timeout, prompter):
         except (OSError, paramiko.SSHException) as exc:
             raise FSError(f"Proxy command failed: {exc}") from exc
     from .proxy import open_connection, proxy_for
-    if proxy_for(site) is None:
+    if proxy_for(proxy_site) is None:
         prompter.log(f"Connecting to {host}:{port} …")
-    return open_connection(site, host, port, timeout, prompter)
+    return open_connection(proxy_site, host, port, timeout, prompter)
 
 
 def _start(sock, site, resolved, prompter, password_holder, timeout) -> SSHConnection:
@@ -204,7 +275,11 @@ def _verify_host_key(transport, host, port, prompter):
         raise AuthFailed("Host key was not accepted")
 
 
-def _load_key(path: str, prompter):
+def _load_key(path: str, prompter, known: str | None = None, holder: dict | None = None):
+    """The private key at ``path``.  An encrypted key is opened with the
+    passphrase ``known`` (remembered for the site or jump host) if that
+    works, else with one asked for; one asked for that works goes into
+    ``holder["key_passphrase"]``."""
     path = os.path.expanduser(path)
     try:
         head = Path(path).read_bytes()[:64]
@@ -215,10 +290,15 @@ def _load_key(path: str, prompter):
             "PuTTY .ppk keys are not supported. Convert it to OpenSSH format with:\n"
             f"puttygen '{path}' -O private-openssh -o '{path[:-4] if path.endswith('.ppk') else path}.pem'")
     passphrase = None
-    for _attempt in range(4):
+    asked = False
+    candidates = [known] if known else []
+    for _attempt in range(5):
         try:
-            return paramiko.PKey.from_path(
+            key = paramiko.PKey.from_path(
                 path, passphrase=passphrase.encode() if passphrase is not None else None)
+            if asked and holder is not None:
+                holder["key_passphrase"] = passphrase
+            return key
         except paramiko.PasswordRequiredException:
             pass                                   # encrypted: ask below
         except TypeError as exc:                   # newer cryptography: "password-protected"
@@ -227,20 +307,25 @@ def _load_key(path: str, prompter):
         except (paramiko.SSHException, ValueError, OSError) as exc:
             if passphrase is None:                 # not a passphrase problem
                 raise AuthFailed(f"Unsupported or invalid private key {path}: {exc}") from exc
+        if candidates:                             # the remembered passphrase first
+            passphrase = candidates.pop()
+            continue
         message = f"Enter the passphrase for {os.path.basename(path)}"
         if passphrase is not None:
             message = "Wrong passphrase. " + message
         passphrase = prompter.ask_password("Key passphrase", message)
+        asked = True
         if passphrase is None:
             raise Cancelled()
     raise AuthFailed("Wrong passphrase for private key")
 
 
-def _candidate_keys(site, prompter):
+def _candidate_keys(site, prompter, holder=None):
     auth = site.get("auth", "auto")
     key_file = site.get("key_file") or ""
+    known = site.get("_key_passphrase")
     if key_file and auth in ("auto", "key"):
-        yield key_file, _load_key(key_file, prompter)
+        yield key_file, _load_key(key_file, prompter, known, holder)
     if auth in ("auto", "agent"):
         try:
             agent = paramiko.Agent()
@@ -251,7 +336,7 @@ def _candidate_keys(site, prompter):
     if auth in ("auto", "key") and not key_file:
         for path in site.get("_config_keys") or []:
             try:
-                yield path, _load_key(path, prompter)
+                yield path, _load_key(path, prompter, known, holder)
             except AuthFailed as exc:
                 prompter.log(str(exc))
     if auth == "auto" and not key_file:
@@ -283,7 +368,7 @@ def _authenticate(transport, site, user, prompter, password_holder):
 
     # -- public keys ---------------------------------------------------------
     if "publickey" in allowed and auth_mode in ("auto", "key", "agent"):
-        for label, key in _candidate_keys(site, prompter):
+        for label, key in _candidate_keys(site, prompter, password_holder):
             try:
                 remaining = transport.auth_publickey(user, key)
             except paramiko.AuthenticationException:

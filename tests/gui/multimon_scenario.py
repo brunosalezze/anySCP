@@ -20,6 +20,14 @@ monitors and drags:
   in:    a file from the Explorer window onto anySCP's server pane
   menu:  (asked for only) a right click opens the context menu next to the
          pointer, and a new local file shows up on the screen
+  clicks: (asked for only) a click on a pane's empty space clears that
+         pane's selection; a double click on a saved site in the site
+         dialog logs in to it
+  jumps: (asked for only) real servers through real jump hosts, set up in the
+         site dialog: P["jumps"] = {"target": {host, user, key, passphrase},
+         "chains": [[{host, user, password}, ...], ...]}; a chain can also be
+         {"hops": [...], "proxy": {type, host, port}}, and a hop can have a
+         "proxy" of its own
   sites: (asked for only) the ways of opening a session - a new site in the
          site dialog, the saved site from the start page and from the site
          dialog, quick connect - and whether the server's files then really show
@@ -91,7 +99,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkWin32", "4.0")
 gi.require_version("Graphene", "1.0")
-from gi.repository import Gdk, GdkWin32, Gio, GLib, Graphene, Gtk  # noqa: E402,F401
+from gi.repository import Adw, Gdk, GdkWin32, Gio, GLib, Graphene, Gtk  # noqa: E402,F401
 
 import win_probe  # noqa: E402
 from anyscp import config  # noqa: E402
@@ -573,9 +581,250 @@ def test_sites(app):
     app.sites.delete(site_id)          # (and its password)
 
 
+def test_clicks(app, page):
+    """With real clicks: empty space of a pane, and a double click in the
+    site dialog."""
+    from anyscp.ui.site_dialog import SiteDialog
+    win = app.window
+    lp, rp = page.local_pane, page.remote_pane
+    for name in ("click-a.txt", "click-b.txt"):
+        for folder in (DIRS["local"], DIRS["remote"]):
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+                fh.write("click\n")
+    for pane in (lp, rp):
+        pane.load(pane.path)
+        spin(lambda: {"click-a.txt", "click-b.txt"} <= names(pane), 10)
+    wait(0.8)
+
+    def selected(pane):
+        return {i.name for i in pane.get_selected_infos()}
+
+    for pane, other in ((lp, rp), (rp, lp)):
+        side = "local" if pane is lp else "server"
+        last = pane.sort_model.get_item(pane.sort_model.get_n_items() - 1).name
+        ok, pt = row_widget(pane, last).compute_point(pane.column_view, Graphene.Point().init(0, 0))
+        below = (pt.y + row_widget(pane, last).get_height() + 30) / pane.column_view.get_height()
+        if not step(f"clicks: the {side} pane has empty space below its files", ok and below < 0.95, below):
+            continue
+        pane.select_names({"click-a.txt", "click-b.txt"})
+        other.select_names({"click-a.txt"})
+        wait(0.3)
+        header = next((w for w in _all_widgets(pane.column_view) if w.get_css_name() == "header"), None)
+        if header is not None:
+            click(to_screen(win, header, 0.9, 0.5))
+            step(f"clicks: a click on the {side} pane's column titles keeps its selection",
+                 selected(pane) == {"click-a.txt", "click-b.txt"}, sorted(selected(pane)))
+        click(to_screen(win, pane.column_view, 0.5, below))
+        shot(f"clicks-{side}-blank.png")
+        step(f"clicks: a click on the {side} pane's empty space clears its selection", not selected(pane),
+             sorted(selected(pane)))
+        step("clicks: ... and not the other pane's", selected(other) == {"click-a.txt"}, sorted(selected(other)))
+        click(to_screen(win, row_widget(pane, "click-b.txt"), 0.6, 0.5))
+        step(f"clicks: a click on a file of the {side} pane selects it", selected(pane) == {"click-b.txt"},
+             sorted(selected(pane)))
+        other.selection.unselect_all()
+    lp.column_view.sort_by_column(lp.columns["name"], Gtk.SortType.ASCENDING)
+    rp.column_view.sort_by_column(rp.columns["name"], Gtk.SortType.ASCENDING)
+
+    site = app.sites.upsert(config.new_site(name="Double-click site", protocol="sftp", host="127.0.0.1",
+                                            port=SERVER_INFO["port"], user="tester", auth="password",
+                                            remote_dir="/", save_password=False))
+    win.sites_changed()
+    dlg = SiteDialog(win, select_new=True)
+    dlg.present(win)
+    wait(1.0)
+    row = next(r for r in _all_widgets(dlg.listbox) if getattr(r, "site", None) and r.site["id"] == site["id"])
+    pages = list(win.pages())
+    click(to_screen(win, row))
+    wait(0.6)
+    step("clicks: a single click on a saved site only shows it",
+         dlg.current.get("id") == site["id"] and list(win.pages()) == pages and dlg.get_mapped())
+    with physical():
+        user32.SetCursorPos(*to_screen(win, row))
+    wait(0.3)
+    for _ in range(2):
+        user32.mouse_event(0x0002, 0, 0, 0, 0)
+        wait(0.04)
+        user32.mouse_event(0x0004, 0, 0, 0, 0)
+        wait(0.06)
+    # (no saved password: the login asks for it)
+    asked = spin(lambda: len(win.pages()) > len(pages) and win.get_visible_dialog() is not None
+                 and win.get_visible_dialog() is not dlg, 10)
+    shot("clicks-double-click.png")
+    new = win.current_page()
+    step("clicks: a double click on a saved site logs in to it",
+         asked and new.site.get("id") == site["id"], (len(pages), len(win.pages()), win.get_visible_dialog()))
+    prompt = win.get_visible_dialog()
+    if asked and prompt is not None and prompt is not dlg:
+        entry = next((w for w in _all_widgets(prompt) if isinstance(w, Gtk.Editable)
+                      and isinstance(w, Gtk.Text)), None)
+        if entry is not None:
+            entry.set_text(PASSWORD)
+        prompt.emit("response", "ok")
+        prompt.force_close()
+        step("clicks: ... and that session connects", spin(lambda: new.session.state == "connected"
+                                                           and "click-a.txt" in names(new.remote_pane or lp), 20),
+             new.session.state)
+    if new is not page:
+        win.close_page(new, force=True)
+    app.sites.delete(site["id"])
+
+
+def answer_prompts(win, page, secrets_by_title, until, timeout, screenshot=None):
+    """Answer the login's prompts (host keys: once; passwords from
+    secrets_by_title) until until() is true; the headings seen.  With
+    screenshot: a picture of the screen at the first prompt."""
+    seen = []
+    end = time.monotonic() + timeout
+    while time.monotonic() < end and not until():
+        spin(lambda: until() or isinstance(win.get_visible_dialog(), Adw.AlertDialog)
+             or page.session.state == "failed", 2)
+        dialog = win.get_visible_dialog()
+        if page.session.state == "failed" or not isinstance(dialog, Adw.AlertDialog):
+            if page.session.state == "failed":
+                break
+            continue
+        heading = dialog.get_heading()
+        if screenshot and not seen:
+            wait(0.4)
+            shot(screenshot)
+        seen.append(heading)
+        if heading in ("Unknown Server", "Host Key Has Changed!"):
+            dialog.emit("response", "once")
+        else:
+            text = secrets_by_title.get(heading)
+            entry = next((w for w in _all_widgets(dialog) if isinstance(w, Gtk.Text)), None)
+            if text is None or entry is None:
+                dialog.emit("response", "cancel")
+            else:
+                entry.set_text(text)
+                dialog.emit("response", "ok")
+        dialog.force_close()
+        wait(0.3)
+    return seen
+
+
+def test_jumps(app):
+    """Real servers through real jump hosts, set up in the site dialog."""
+    from anyscp.ui.site_dialog import AUTH_MODES, SiteDialog
+    win = app.window
+    J = P["jumps"]
+    target = J["target"]
+    key = next((k for k in target["keys"] if os.path.isfile(k)), None)
+    if not step("jumps: the key file is reachable", key, target["keys"]):
+        return
+    place(app_hwnd(win), layout(0, 0)[0])
+    wait(1.0)
+    from anyscp.backends.proxy import PROXY_TYPES
+
+    def set_proxy(rows, proxy):
+        type_row, host_row, port_row = rows
+        type_row.set_selected(PROXY_TYPES.index(proxy["type"]))
+        host_row.set_text(proxy["host"])
+        port_row.set_value(proxy["port"])
+
+    def via(proxy):
+        return f"[{proxy['type']} proxy {proxy['host']}:{proxy['port']}] -> " if proxy else ""
+
+    for n, chain in enumerate(J["chains"], 1):
+        site_proxy = chain.get("proxy") if isinstance(chain, dict) else None
+        chain = chain["hops"] if isinstance(chain, dict) else chain
+        label = f"jumps {n}: PC -> " + "".join(via(h.get("proxy")) + h["host"] + " -> " for h in chain) \
+            + via(site_proxy) + target["host"]
+        dlg = SiteDialog(win, select_new=True)
+        dlg.present(win)
+        wait(1.0)
+        dlg.name_row.set_text(f"Through {len(chain)} jump host(s) {n}")
+        dlg.host_row.set_text(target["host"])
+        dlg.user_row.set_text(target["user"])
+        dlg.auth_row.set_selected(AUTH_MODES.index("key"))
+        dlg._set_key(key)                       # (its passphrase is asked at the first login)
+        dlg.save_pw_row.set_active(True)
+        scroller = next(w for w in _all_widgets(dlg.page) if isinstance(w, Gtk.ScrolledWindow))
+        for hop in chain:
+            adj = scroller.get_vadjustment()
+            adj.set_value(adj.get_upper())
+            wait(0.5)
+            click(to_screen(win, dlg.add_jump_btn, 0.3, 0.5))      # (the button's main part)
+            if not step(f"{label}: a click on Add adds a jump host", len(dlg.jump_rows) == chain.index(hop) + 1):
+                dlg.add_jump()
+            row = dlg.jump_rows[-1]
+            row.host_row.set_text(hop["host"])
+            row.user_row.set_text(hop["user"])
+            row.auth_row.set_selected(AUTH_MODES.index("password"))
+            row.password_row.set_text(hop["password"])
+            row.save_pw_row.set_active(True)
+            if hop.get("key"):
+                row.auth_row.set_selected(AUTH_MODES.index("key"))
+                row.set_key(hop["key"])
+                row.passphrase_row.set_text(hop["passphrase"])
+            if hop.get("proxy"):
+                set_proxy((row.proxy_type_row, row.proxy_host_row, row.proxy_port_row), hop["proxy"])
+            row.set_expanded(False)
+        if site_proxy:
+            set_proxy((dlg.proxy_type_row, dlg.proxy_host_row, dlg.proxy_port_row), site_proxy)
+        wait(0.5)
+        step(f"{label}: Add made {len(chain)} jump host(s)", len(dlg.jump_rows) == len(chain),
+             [r.get_subtitle() for r in dlg.jump_rows])
+        shot(f"jumps-{n}-dialog.png")
+        click(to_screen(win, dlg.login_btn))
+        page = win.current_page()
+        if not step(f"{label}: Log In opens a session", page is not None):
+            continue
+        prompts = {"Key passphrase": target["passphrase"]}
+
+        def listed():
+            return page.session.state == "connected" and page.remote_pane is not None \
+                and page.remote_pane.path and page.remote_pane.entries
+        seen = answer_prompts(win, page, prompts, listed, 90, screenshot=f"jumps-{n}-connecting.png")
+        ok = spin(listed, 30)
+        log = page.session.log_lines
+        stages = page.session.stages
+        step(f"{label}: the connection screen listed each machine, all ticked off",
+             len(stages) == len(chain) + 1 and all(st["state"] == "done" for st in stages),
+             [(st["title"], st["role"], st["state"]) for st in stages])
+        tunnels = [line[9:] for line in log if "Opening a tunnel" in line]
+        step(f"{label}: connects and lists the server's home folder", ok,
+             f"prompts {seen}; path {page.remote_pane and page.remote_pane.path}; "
+             f"entries {page.remote_pane and len(page.remote_pane.entries)}; error {page.session.error!r}; "
+             f"log {log[-6:]}")
+        step(f"{label}: ... through each jump host in turn", len(tunnels) == len(chain), tunnels)
+        proxied = [line[9:] for line in log if " proxy " in line and ("Connecting" in line or "tunnel" in line)]
+        wanted = sum(1 for h in chain if h.get("proxy")) + (1 if site_proxy else 0)
+        step(f"{label}: ... and through each proxy", len(proxied) == wanted, proxied)
+        if ok:
+            shot(f"jumps-{n}-session.png")
+            status, out, _err = page.session.fs.exec("hostname")
+            step(f"{label}: ... to the right machine", status == 0 and out.strip(), out.strip())
+        site_id = page.site.get("id")
+        win.close_page(page, force=True)
+        spin(lambda: page not in win.pages(), 10)
+        if not ok:
+            continue
+
+        # again from the saved site, as after a restart (nothing in memory but
+        # the password store): its passwords and passphrases apply by themselves
+        saved = {k: v for k, v in app.sites.get(site_id).items() if not k.startswith("_")}
+        saved["jumps"] = [{k: v for k, v in h.items() if not k.startswith("_")} for h in saved["jumps"]]
+        config.secrets._memory.clear()
+        win.open_session(saved)
+        page = win.current_page()
+        seen = answer_prompts(win, page, {}, listed, 90)
+        ok = spin(listed, 30)
+        step(f"{label}: the saved site connects again without asking for any password or passphrase",
+             ok and set(seen) <= {"Unknown Server"}, f"prompts {seen}; error {page.session.error!r}")
+        win.close_page(page, force=True)
+        spin(lambda: page not in win.pages(), 10)
+        app.sites.delete(site_id)
+
+
 def run(app):
     win = app.window
     watch_drag_begin()
+    if "jumps" in CASES:
+        test_jumps(app)
+        if CASES == ["jumps"]:
+            return
     if "sites" in CASES:
         test_sites(app)
         if CASES == ["sites"]:
@@ -592,6 +841,12 @@ def run(app):
         diagnose(page)
         return
     lp, rp = page.local_pane, page.remote_pane
+    if "clicks" in CASES:
+        place(app_hwnd(win), layout(0, 0)[0])
+        wait(1.0)
+        test_clicks(app, page)
+        if CASES == ["clicks"]:
+            return
     monitors = P.get("monitors") or list(range(len(result["monitors"])))
     explorer = open_explorer(DIRS["explorer"])
     source = open_explorer(DIRS["source"]) if "in" in CASES else None

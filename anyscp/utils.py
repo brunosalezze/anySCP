@@ -38,8 +38,9 @@ def ask_main(fn):
     box = {}
 
     def reply(value):
-        box["value"] = value
-        done.set()
+        if not done.is_set():           # the first answer counts (a dialog may answer again as it closes)
+            box["value"] = value
+            done.set()
 
     def run():
         try:

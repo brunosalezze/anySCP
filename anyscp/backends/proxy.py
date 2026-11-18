@@ -62,6 +62,12 @@ class Proxy:
         except OSError as exc:
             raise ProxyError(f"Could not connect to the proxy {self.host}:{self.port}: "
                              f"{exc.strerror or exc}") from exc
+        return self.handshake(sock, host, port)
+
+    def handshake(self, sock, host: str, port: int):
+        """Ask the proxy on the other end of ``sock`` (a socket, or an SSH
+        channel to the proxy) to connect to host:port; returns ``sock``,
+        closed if that fails."""
         try:
             {"socks5": self._socks5, "socks4": self._socks4, "http": self._http}[self.kind](sock, host, port)
         except TimeoutError as exc:
@@ -194,14 +200,21 @@ def ask_proxy_password(prompter, proxy: Proxy) -> str:
     return password
 
 
+def ready_proxy(site: dict, prompter=None) -> Proxy | None:
+    """The site's proxy with its password (asked now if it needs one and
+    none is known), or None."""
+    proxy = proxy_for(site)
+    if proxy is not None and proxy.user and proxy.password is None and prompter is not None:
+        proxy.password = ask_proxy_password(prompter, proxy)
+        site["_proxy_password"] = proxy.password        # (for the clones' connections)
+    return proxy
+
+
 def open_connection(site: dict, host: str, port: int, timeout: float | None, prompter=None) -> socket.socket:
     """A TCP connection to host:port for ``site``: through its proxy if it
     has one, else direct.  Errors become :class:`FSError` with a readable text."""
-    proxy = proxy_for(site)
+    proxy = ready_proxy(site, prompter)
     if proxy is not None:
-        if proxy.user and proxy.password is None and prompter is not None:
-            proxy.password = ask_proxy_password(prompter, proxy)
-            site["_proxy_password"] = proxy.password        # (for the clones' connections)
         if prompter is not None:
             prompter.log(f"Connecting to {host}:{port} through the {proxy.label} …")
         return proxy.connect(host, port, timeout)

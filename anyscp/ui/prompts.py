@@ -113,6 +113,14 @@ class UIPrompter:
         if self.session is not None:
             self.session.log(message)
 
+    def connection_plan(self, stages):
+        if self.session is not None:
+            self.session.connection_plan(stages)
+
+    def connection_stage(self, index):
+        if self.session is not None:
+            self.session.connection_stage(index)
+
     # -- connect-time prompts ----------------------------------------------
     def ask_password(self, title, message, remember=True):
         """remember=False: not the site's own password (a jump host's, the

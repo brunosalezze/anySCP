@@ -15,7 +15,8 @@ from gi.repository import GLib, GObject
 from .backends import create_fs
 from .backends.base import ConnectionLost, FileSystem, FSError
 from .backends.local import LocalFileSystem
-from .config import jump_hops, proxy_secret_id, secrets, site_title
+from .config import (jump_chain, jump_hops, jump_secret_id, key_secret_id, proxy_secret_id, secrets,
+                     site_subtitle, site_title)
 
 
 def _idle(fn, *args):
@@ -74,6 +75,7 @@ class Session(GObject.Object):
     __gsignals__ = {
         "state-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "log": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "progress": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(self, site: dict, prompter):
@@ -85,6 +87,11 @@ class Session(GObject.Object):
         self.state = "disconnected"
         self.error: BaseException | None = None
         self.log_lines: list[str] = []
+        # How the last connection went, machine by machine (the jump hosts,
+        # then the server): {"title", "role", "state": waiting | active |
+        # done | failed, "events": [log lines]}.  Main thread only.
+        self.stages: list[dict] = []
+        self._stage = -1
         self.worker = SerialWorker(f"session:{site_title(site)}")
         self._pool: list[FileSystem] = []
         self._clones: set = set()
@@ -104,6 +111,47 @@ class Session(GObject.Object):
         if len(self.log_lines) > 5000:
             del self.log_lines[:1000]
         _idle(self.emit, "log", line)
+        _idle(self._stage_event, message)
+
+    # -- progress of the connection, machine by machine ----------------------
+    # (called from any thread; the changes are made in the main loop, in order)
+    def connection_plan(self, stages: list[tuple[str, str]]):
+        """The machines the connection goes through: (title, role) each."""
+        _idle(self._set_plan, list(stages))
+
+    def connection_stage(self, index: int):
+        """Now connecting to the index-th machine of the plan."""
+        _idle(self._start_stage, index)
+
+    def _set_plan(self, stages):
+        self.stages = [{"title": title, "role": role, "state": "waiting", "events": []} for title, role in stages]
+        self._stage = -1
+        self.emit("progress")
+
+    def _start_stage(self, index):
+        if not 0 <= index < len(self.stages):
+            return
+        for stage in self.stages[:index]:
+            if stage["state"] == "active":
+                stage["state"] = "done"
+        self.stages[index]["state"] = "active"
+        self._stage = index
+        self.emit("progress")
+
+    def _stage_event(self, message):
+        if self.state == "connecting" and 0 <= self._stage < len(self.stages):
+            self.stages[self._stage]["events"].append(message)
+            self.emit("progress")
+
+    def _end_stages(self, error: BaseException | None):
+        for n, stage in enumerate(self.stages):
+            if error is None:
+                stage["state"] = "done"
+            elif n == self._stage:
+                stage["state"] = "failed"
+                stage["events"].append(str(error) or error.__class__.__name__)
+        self._stage = -1
+        self.emit("progress")
 
     def _set_state(self, state: str):
         self.state = state
@@ -112,6 +160,10 @@ class Session(GObject.Object):
     # -- connection ----------------------------------------------------------
     def connect_async(self, on_done=None, on_error=None):
         self._set_state("connecting")
+        port = self.site.get("port")
+        self._set_plan([(f"{self.site.get('host', '')}" + (f":{port}" if port else ""),
+                         site_subtitle(self.site).split(" · ")[0] + " server")])
+        self._start_stage(0)
 
         def job():
             site = self.site
@@ -119,10 +171,15 @@ class Session(GObject.Object):
                 stored = secrets.lookup(site["id"])
                 if stored is not None:
                     site["_password"] = stored
+            if site.get("_key_passphrase") is None and site.get("id") and site.get("save_password") \
+                    and site.get("key_file") and not site.get("_quick"):
+                site["_key_passphrase"] = secrets.lookup(key_secret_id(site["id"]))
             if site.get("proxy_type", "none") != "none" and site.get("proxy_user") \
                     and site.get("_proxy_password") is None and site.get("id"):
                 site["_proxy_password"] = secrets.lookup(proxy_secret_id(site["id"]))
-            if site.get("protocol") in ("sftp", "scp") and (site.get("jump_hosts") or "").strip():
+            if site.get("protocol") in ("sftp", "scp") and site.get("jumps"):
+                site["_jumps"] = jump_chain(site)
+            elif site.get("protocol") in ("sftp", "scp") and (site.get("jump_hosts") or "").strip():
                 try:
                     site["_jumps"] = jump_hops(site)
                 except ValueError as exc:
@@ -138,9 +195,12 @@ class Session(GObject.Object):
             self.fs = fs
             self.error = None
             self.connected_at = time.time()
+            self._end_stages(None)
             hook = getattr(self.prompter, "connection_succeeded", None)
             if hook:
                 hook()
+            self._keep_passphrase(fs)
+            self._keep_jump_passwords()
             self._set_state("connected")
             self._start_keepalive()
             if on_done:
@@ -151,11 +211,48 @@ class Session(GObject.Object):
                 return
             self.error = exc
             self.log(f"Connection failed: {exc}")
+            self._end_stages(exc)
             self._set_state("failed")
             if on_error:
                 on_error(exc)
 
         self.worker.submit(job, done, failed)
+
+    def _keep_passphrase(self, fs):
+        """The passphrase of the site's key, if it had to be typed: kept for
+        this session's reconnections, and remembered if the site says so."""
+        holder = getattr(fs, "password_holder", None) or {}
+        passphrase = holder.pop("key_passphrase", None)
+        site = self.site
+        if passphrase is None:
+            return
+        site["_key_passphrase"] = passphrase
+        if site.get("save_password") and site.get("id") and not site.get("_quick"):
+            secrets.store(key_secret_id(site["id"]), f"{site_title(site)} (key passphrase)", passphrase)
+
+    def _keep_jump_passwords(self):
+        """Passwords of jump hosts typed while logging in: kept for this
+        session's reconnections, and remembered if the jump host says so."""
+        site = self.site
+        by_id = {hop.get("id"): hop for hop in site.get("jumps") or []}
+        for hop in site.get("_jumps") or []:
+            saved = by_id.get(hop.get("id"))
+            if saved is None:
+                continue
+            if hop.get("_proxy_password") is not None:
+                saved["_proxy_password"] = hop["_proxy_password"]
+            if hop.pop("_key_passphrase_entered", False):
+                saved["_key_passphrase"] = hop["_key_passphrase"]
+                if hop.get("save_password") and site.get("id") and not site.get("_quick"):
+                    secrets.store(jump_secret_id(site["id"], hop["id"], key=True),
+                                  f"{site_title(site)} (jump host {hop.get('_jump_label')}, key passphrase)",
+                                  hop["_key_passphrase"])
+            if not hop.pop("_password_entered", False):
+                continue
+            saved["_password"] = hop["_password"]
+            if hop.get("save_password") and site.get("id") and not site.get("_quick"):
+                secrets.store(jump_secret_id(site["id"], hop["id"]),
+                              f"{site_title(site)} (jump host {hop.get('_jump_label')})", hop["_password"])
 
     def reconnect_async(self, on_done=None, on_error=None):
         self._close_connections()

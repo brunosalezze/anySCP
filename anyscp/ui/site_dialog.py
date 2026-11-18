@@ -7,13 +7,14 @@ from __future__ import annotations
 import copy
 import os
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from ..backends.proxy import DEFAULT_PORTS as DEFAULT_PROXY_PORTS
 from ..backends.proxy import PROXY_LABELS, PROXY_TYPES
+from ..backends.sshconfig import parse_host_spec
 from ..config import (FTP_ENCRYPTION, FTP_ENCRYPTION_LABELS, PROTOCOL_ORDER, PROTOCOLS,
-                      SSH_PROTOCOLS, default_port, new_site, proxy_secret_id, secrets, site_subtitle,
-                      site_title)
+                      SSH_PROTOCOLS, default_port, jump_hops, jump_label, jump_secret_id, key_secret_id,
+                      new_jump, new_site, proxy_secret_id, secrets, site_subtitle, site_title)
 from ..utils import SITE_COLORS, color_dot_icon
 from .prompts import alert
 
@@ -51,6 +52,161 @@ class SiteRow(Gtk.ListBoxRow):
             box.append(dot)
         self.set_child(box)
         self.search_text = f"{title} {subtitle} {site.get('folder', '') if site else ''}".lower()
+
+
+def _remember_row() -> Adw.SwitchRow:
+    row = Adw.SwitchRow(title="Remember password and passphrase",
+                        subtitle=f"Stored in the {secrets.backend_name}" if secrets.available
+                        else "No keyring available: asked on every login")
+    row.set_sensitive(secrets.available)
+    return row
+
+
+def _passphrase_row() -> Adw.PasswordEntryRow:
+    return Adw.PasswordEntryRow(title="Key passphrase (if the key has one)")
+
+
+def _flat_button(icon, tooltip, callback):
+    button = Gtk.Button(icon_name=icon, valign=Gtk.Align.CENTER, tooltip_text=tooltip)
+    button.add_css_class("flat")
+    button.connect("clicked", lambda *_a: callback())
+    return button
+
+
+class JumpHostRow(Adw.ExpanderRow):
+    """One jump host of a site: an SSH server with a login of its own (user,
+    password, key, proxy), like the site itself."""
+
+    def __init__(self, dialog):
+        super().__init__()
+        self.dialog = dialog
+        self.hop = new_jump()
+        self.add_css_class("jump-host")
+        self.up_btn = _flat_button("go-up-symbolic", "Connect to it earlier", lambda: dialog.move_jump(self, -1))
+        self.add_suffix(_flat_button("user-trash-symbolic", "Remove this jump host",
+                                     lambda: dialog.remove_jump(self)))
+        self.add_suffix(self.up_btn)            # (suffixes are shown last added first)
+
+        self.host_row = Adw.EntryRow(title="Host name")
+        self.host_row.connect("changed", lambda *_a: self.update_summary())
+        self.add_row(self.host_row)
+        self.port_row = Adw.SpinRow.new_with_range(1, 65535, 1)
+        self.port_row.set_title("Port number")
+        self.port_row.connect("notify::value", lambda *_a: self.update_summary())
+        self.add_row(self.port_row)
+        self.user_row = Adw.EntryRow(title="User name")
+        self.user_row.connect("changed", lambda *_a: self.update_summary())
+        self.add_row(self.user_row)
+        self.password_row = Adw.PasswordEntryRow(title="Password")
+        self.add_row(self.password_row)
+        self.auth_row = Adw.ComboRow(title="Authentication", model=Gtk.StringList.new(AUTH_LABELS))
+        self.auth_row.connect("notify::selected", lambda *_a: self.update_visibility())
+        self.add_row(self.auth_row)
+        self.key_row = Adw.ActionRow(title="Private key file")
+        self.key_row.set_subtitle_selectable(True)
+        self.key_row.add_suffix(_flat_button("document-open-symbolic", "Choose key file",
+                                             lambda: dialog._choose_file(self.set_key, folder=False)))
+        self.key_row.add_suffix(_flat_button("edit-clear-symbolic", "Clear", lambda: self.set_key("")))
+        self.add_row(self.key_row)
+        self.passphrase_row = _passphrase_row()
+        self.add_row(self.passphrase_row)
+        self.save_pw_row = _remember_row()
+        self.add_row(self.save_pw_row)
+        self.proxy_type_row = Adw.ComboRow(title="Proxy to reach it", model=Gtk.StringList.new(list(PROXY_LABELS)))
+        self.proxy_type_row.connect("notify::selected", self._on_proxy_type_changed)
+        self.add_row(self.proxy_type_row)
+        self.proxy_host_row = Adw.EntryRow(title="Proxy host")
+        self.proxy_host_row.connect("changed", lambda *_a: self.update_summary())
+        self.add_row(self.proxy_host_row)
+        self.proxy_port_row = Adw.SpinRow.new_with_range(1, 65535, 1)
+        self.proxy_port_row.set_title("Proxy port")
+        self.add_row(self.proxy_port_row)
+        self.proxy_user_row = Adw.EntryRow(title="Proxy user name (if it needs a login)")
+        self.add_row(self.proxy_user_row)
+        self.proxy_password_row = Adw.PasswordEntryRow(title="Proxy password")
+        self.add_row(self.proxy_password_row)
+        self._loading = False
+        self._key_file = ""
+        self.load(self.hop)                     # the defaults: port 22, password, no proxy, …
+
+    def load(self, hop: dict, password: str = "", proxy_password: str = "", passphrase: str = ""):
+        self._loading = True
+        self.hop = new_jump(**{k: v for k, v in hop.items() if not k.startswith("_")})
+        hop = self.hop
+        self.host_row.set_text(hop["host"])
+        self.port_row.set_value(int(hop["port"] or 22))
+        self.user_row.set_text(hop["user"])
+        self.password_row.set_text(password or "")
+        self.save_pw_row.set_active(bool(hop["save_password"]) and secrets.available)
+        self.auth_row.set_selected(AUTH_MODES.index(hop["auth"]) if hop["auth"] in AUTH_MODES else 0)
+        self.set_key(hop["key_file"])
+        kind = hop["proxy_type"] or "none"
+        self.proxy_type_row.set_selected(PROXY_TYPES.index(kind) if kind in PROXY_TYPES else 0)
+        self.proxy_host_row.set_text(hop["proxy_host"] or "")
+        self.proxy_port_row.set_value(int(hop["proxy_port"] or DEFAULT_PROXY_PORTS.get(kind, 1080)))
+        self.proxy_user_row.set_text(hop["proxy_user"] or "")
+        self.proxy_password_row.set_text(proxy_password or "")
+        self.passphrase_row.set_text(passphrase or "")
+        self._loading = False
+        self.update_visibility()
+
+    def read(self) -> dict:
+        hop = dict(self.hop)
+        user, host, port = parse_host_spec(self.host_row.get_text())   # (user@host:port typed as the host)
+        hop["host"] = host
+        hop["user"] = self.user_row.get_text().strip() or user
+        hop["port"] = port or int(self.port_row.get_value())
+        hop["save_password"] = self.save_pw_row.get_active()
+        hop["auth"] = AUTH_MODES[self.auth_row.get_selected()]
+        hop["key_file"] = self._key_file
+        hop["proxy_type"] = PROXY_TYPES[self.proxy_type_row.get_selected()]
+        hop["proxy_host"] = self.proxy_host_row.get_text().strip()
+        hop["proxy_port"] = int(self.proxy_port_row.get_value())
+        hop["proxy_user"] = self.proxy_user_row.get_text().strip()
+        hop["_password"] = self.password_row.get_text() or None
+        hop["_proxy_password"] = self.proxy_password_row.get_text() or None
+        hop["_key_passphrase"] = self.passphrase_row.get_text() or None
+        return hop
+
+    def set_key(self, path):
+        self._key_file = path or ""
+        self.key_row.set_subtitle(GLib.markup_escape_text(path) if path else "Default keys from ~/.ssh")
+        self.update_summary()
+
+    def set_position(self, n: int, count: int):
+        self.set_title(f"Jump host {n + 1}" if count > 1 else "Jump host")
+        self.up_btn.set_visible(n > 0)
+
+    def _on_proxy_type_changed(self, *_a):
+        kind = PROXY_TYPES[self.proxy_type_row.get_selected()]
+        if not self._loading and int(self.proxy_port_row.get_value()) in DEFAULT_PROXY_PORTS.values():
+            self.proxy_port_row.set_value(DEFAULT_PROXY_PORTS.get(kind, 1080))
+        self.update_visibility()
+
+    def update_visibility(self):
+        auth = AUTH_MODES[self.auth_row.get_selected()]
+        self.key_row.set_visible(auth in ("auto", "key"))
+        self.passphrase_row.set_visible(auth in ("auto", "key"))
+        self.password_row.set_visible(auth in ("auto", "password"))
+        self.save_pw_row.set_visible(auth != "agent")
+        proxy = PROXY_TYPES[self.proxy_type_row.get_selected()] != "none"
+        for row in (self.proxy_host_row, self.proxy_port_row, self.proxy_user_row, self.proxy_password_row):
+            row.set_visible(proxy)
+        self.update_summary()
+
+    def update_summary(self):
+        if not hasattr(self, "proxy_host_row"):
+            return
+        hop = self.read()
+        parts = [jump_label(hop) if hop["host"] else "No host yet"]
+        if hop["auth"] == "key" or (hop["auth"] == "auto" and hop["key_file"]):
+            parts.append(os.path.basename(hop["key_file"]) if hop["key_file"] else "public key")
+        elif hop["auth"] == "agent":
+            parts.append("SSH agent")
+        if hop["proxy_type"] != "none":
+            label = PROXY_LABELS[PROXY_TYPES.index(hop["proxy_type"])].split(" ")[0]
+            parts.append(f"via {label} {hop['proxy_host'] or '?'}")
+        self.set_subtitle(GLib.markup_escape_text(" · ".join(parts)))
 
 
 class SiteDialog(Adw.Dialog):
@@ -121,6 +277,10 @@ class SiteDialog(Adw.Dialog):
         self.listbox.set_header_func(self._row_header)
         self.listbox.connect("row-selected", self._on_row_selected)
         self.listbox.connect("row-activated", lambda *_a: self.split.set_show_content(True))
+        # A double click on a saved site logs in to it (the first click selected it).
+        double = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY, propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        double.connect("pressed", self._on_list_pressed)
+        self.listbox.add_controller(double)
         view.set_content(Gtk.ScrolledWindow(child=self.listbox, vexpand=True,
                                             hscrollbar_policy=Gtk.PolicyType.NEVER))
         return Adw.NavigationPage(title="Sites", child=view)
@@ -159,6 +319,19 @@ class SiteDialog(Adw.Dialog):
                 self.listbox.select_row(row)
                 return
             i += 1
+
+    def _on_list_pressed(self, _gesture, n_press, _x, y):
+        if n_press != 2 or self.split.get_collapsed():
+            return
+        row = self.listbox.get_row_at_y(int(y))
+        if row is None or row.site is None:
+            return
+
+        def login():
+            if self.listbox.get_selected_row() is row and not self.is_new:
+                self._login()
+            return False
+        GLib.idle_add(login)            # after the list has handled the click (and selected the row)
 
     def _on_row_selected(self, _lb, row):
         if row is None:
@@ -206,11 +379,6 @@ class SiteDialog(Adw.Dialog):
         self.password_row = Adw.PasswordEntryRow(title="Password")
         self.password_row.connect("entry-activated", lambda *_a: self._login())
         login.add(self.password_row)
-        self.save_pw_row = Adw.SwitchRow(title="Remember password",
-                                         subtitle=f"Stored in the {secrets.backend_name}" if secrets.available
-                                         else "No keyring available: asked on every login")
-        self.save_pw_row.set_sensitive(secrets.available)
-        login.add(self.save_pw_row)
         self.auth_row = Adw.ComboRow(title="Authentication", model=Gtk.StringList.new(AUTH_LABELS))
         self.auth_row.connect("notify::selected", lambda *_a: self._update_visibility())
         login.add(self.auth_row)
@@ -227,6 +395,11 @@ class SiteDialog(Adw.Dialog):
         self.key_row.add_suffix(pick_key)
         self.key_row.add_suffix(clear_key)
         login.add(self.key_row)
+        self.passphrase_row = _passphrase_row()
+        self.passphrase_row.connect("entry-activated", lambda *_a: self._login())
+        login.add(self.passphrase_row)
+        self.save_pw_row = _remember_row()
+        login.add(self.save_pw_row)
         page.add(login)
 
         dirs = Adw.PreferencesGroup(title="Directories")
@@ -295,25 +468,6 @@ class SiteDialog(Adw.Dialog):
         self.proxy_expander.add_row(self.proxy_password_row)
         adv.add(self.proxy_expander)
 
-        self.jump_expander = Adw.ExpanderRow(title="Jump hosts", subtitle="None: connect directly")
-        self.jump_row = Adw.EntryRow(title="Through these SSH servers, in this order")
-        self.jump_row.connect("changed", lambda *_a: self._update_jump_summary())
-        self.jump_menu = Gtk.MenuButton(icon_name="list-add-symbolic", valign=Gtk.Align.CENTER,
-                                        tooltip_text="Add a saved site")
-        self.jump_menu.add_css_class("flat")
-        self.jump_popover = Gtk.Popover()
-        self.jump_popover.add_css_class("menu")
-        self.jump_popover.connect("show", lambda *_a: self._fill_jump_menu())
-        self.jump_menu.set_popover(self.jump_popover)
-        self.jump_row.add_suffix(self.jump_menu)
-        self.jump_expander.add_row(self.jump_row)
-        hint = Adw.ActionRow(subtitle="Saved sites (each logs in with its own settings) or user@host:port, "
-                                      "separated by commas, like ssh -J. A proxy is used to reach the first.")
-        hint.set_subtitle_lines(3)
-        hint.add_css_class("property")
-        self.jump_expander.add_row(hint)
-        adv.add(self.jump_expander)
-
         expander = Adw.ExpanderRow(title="Advanced settings", subtitle="Timeouts, keepalive, compression")
         self.timeout_row = Adw.SpinRow.new_with_range(3, 300, 1)
         self.timeout_row.set_title("Timeout (seconds)")
@@ -327,6 +481,27 @@ class SiteDialog(Adw.Dialog):
         expander.add_row(self.passive_row)
         adv.add(expander)
         page.add(adv)
+
+        # jump hosts: you → jump host 1 → … → the site --------------------------
+        self.jumps_group = Adw.PreferencesGroup(
+            title="Jump hosts",
+            description="SSH servers to go through, in this order (like ssh -J). Each logs in "
+                        "with its own settings; a proxy is used to reach the server it is set for.")
+        self.add_jump_btn = Adw.SplitButton(label="_Add", use_underline=True,
+                                            tooltip_text="Add a jump host",
+                                            dropdown_tooltip="Add a copy of a saved site",
+                                            valign=Gtk.Align.CENTER)
+        self.add_jump_btn.connect("clicked", lambda *_a: self.add_jump(expand=True))
+        self.jump_popover = Gtk.Popover()
+        self.jump_popover.add_css_class("menu")
+        self.jump_popover.connect("show", lambda *_a: self._fill_jump_menu())
+        self.add_jump_btn.set_popover(self.jump_popover)
+        self.jumps_group.set_header_suffix(self.add_jump_btn)
+        self.no_jumps_row = Adw.ActionRow(title="None", subtitle="Connects to the site directly")
+        self.no_jumps_row.add_css_class("dim-label")
+        self.jumps_group.add(self.no_jumps_row)
+        self.jump_rows: list[JumpHostRow] = []
+        page.add(self.jumps_group)
 
         view.set_content(page)
 
@@ -356,6 +531,7 @@ class SiteDialog(Adw.Dialog):
 
     # ------------------------------------------------------------------ load/save
     def load_site(self, site: dict, new: bool):
+        site = self._upgrade_jump_hosts(site, new)
         self._loading = True
         self.current = copy.deepcopy(site)
         self.is_new = new
@@ -372,6 +548,10 @@ class SiteDialog(Adw.Dialog):
         if not password and not new and site.get("save_password"):
             password = secrets.lookup(site["id"]) or ""
         self.password_row.set_text(password)
+        passphrase = site.get("_key_passphrase") or ""
+        if not passphrase and not new and site.get("save_password") and site.get("key_file"):
+            passphrase = secrets.lookup(key_secret_id(site["id"])) or ""
+        self.passphrase_row.set_text(passphrase)
         self.save_pw_row.set_active(bool(site.get("save_password", True)) and secrets.available)
         auth = site.get("auth", "auto")
         self.auth_row.set_selected(AUTH_MODES.index(auth) if auth in AUTH_MODES else 0)
@@ -396,9 +576,8 @@ class SiteDialog(Adw.Dialog):
         if not proxy_password and not new and site.get("proxy_user"):
             proxy_password = secrets.lookup(proxy_secret_id(site["id"])) or ""
         self.proxy_password_row.set_text(proxy_password)
-        self.jump_row.set_text(site.get("jump_hosts", ""))
+        self._load_jumps(site, new)
         self._update_proxy_summary()
-        self._update_jump_summary()
         self.delete_btn.set_visible(not new)
         self._loading = False
         self._update_visibility()
@@ -433,24 +612,33 @@ class SiteDialog(Adw.Dialog):
         site["compression"] = self.compression_row.get_active()
         site["ftp_passive"] = self.passive_row.get_active()
         site["_password"] = self.password_row.get_text() or None
+        site["_key_passphrase"] = self.passphrase_row.get_text() or None
         site["proxy_type"] = PROXY_TYPES[self.proxy_type_row.get_selected()]
         site["proxy_host"] = self.proxy_host_row.get_text().strip()
         site["proxy_port"] = int(self.proxy_port_row.get_value())
         site["proxy_user"] = self.proxy_user_row.get_text().strip()
         site["_proxy_password"] = self.proxy_password_row.get_text() or None
-        hops = [h.strip() for h in self.jump_row.get_text().split(",") if h.strip()]
-        site["jump_hosts"] = ", ".join(hops) if site["protocol"] in SSH_PROTOCOLS else ""
+        site["jumps"] = [row.read() for row in self.jump_rows] if site["protocol"] in SSH_PROTOCOLS else []
+        site["jump_hosts"] = ""
         return site
 
     def _persist(self, site: dict) -> dict:
         password = site.get("_password")
         if not site["name"]:
             site["name"] = site_title({**site, "name": ""})
+        before = self.store.get(site["id"]) or {}
+        hops = [dict(hop) for hop in site.get("jumps") or []]
         saved = self.store.upsert(site)
+        self._persist_jump_passwords(saved, hops, before.get("jumps") or [])
         if site["save_password"] and password:
             secrets.store(saved["id"], saved["name"], password)
         elif not site["save_password"]:
             secrets.clear(saved["id"])
+        passphrase = site.get("_key_passphrase")
+        if site["save_password"] and passphrase and site.get("key_file"):
+            secrets.store(key_secret_id(saved["id"]), f"{saved['name']} (key passphrase)", passphrase)
+        elif not site["save_password"] or not site.get("key_file"):
+            secrets.clear(key_secret_id(saved["id"]))
         proxy_password = site.get("_proxy_password")
         if site["proxy_type"] != "none" and site["proxy_user"] and proxy_password:
             secrets.store(proxy_secret_id(saved["id"]), f"{saved['name']} (proxy)", proxy_password)
@@ -460,6 +648,31 @@ class SiteDialog(Adw.Dialog):
         self.current = copy.deepcopy(saved)
         self.window.sites_changed()
         return saved
+
+    @staticmethod
+    def _persist_jump_passwords(saved: dict, hops: list[dict], before: list[dict]):
+        for hop in hops:
+            secret_id = jump_secret_id(saved["id"], hop["id"])
+            label = f"{saved['name']} (jump host {jump_label(hop)})"
+            if hop["save_password"] and hop.get("_password"):
+                secrets.store(secret_id, label, hop["_password"])
+            elif not hop["save_password"]:
+                secrets.clear(secret_id)
+            key_id = jump_secret_id(saved["id"], hop["id"], key=True)
+            if hop["save_password"] and hop.get("_key_passphrase") and hop["key_file"]:
+                secrets.store(key_id, f"{label} (key passphrase)", hop["_key_passphrase"])
+            elif not hop["save_password"] or not hop["key_file"]:
+                secrets.clear(key_id)
+            proxy_id = jump_secret_id(saved["id"], hop["id"], proxy=True)
+            if hop["proxy_type"] != "none" and hop["proxy_user"] and hop.get("_proxy_password"):
+                secrets.store(proxy_id, f"{label} (proxy)", hop["_proxy_password"])
+            else:
+                secrets.clear(proxy_id)
+        kept = {hop["id"] for hop in hops}
+        for hop in before:
+            if hop.get("id") not in kept:
+                for kind in ({}, {"proxy": True}, {"key": True}):
+                    secrets.clear(jump_secret_id(saved["id"], hop.get("id", ""), **kind))
 
     def _save(self):
         site = self.read_form()
@@ -480,9 +693,13 @@ class SiteDialog(Adw.Dialog):
         # Logging in saves the site, new or changed, as it is in the form
         # (the password only goes to the keyring if "save password" is on).
         password, proxy_password = site.get("_password"), site.get("_proxy_password")
+        passphrase = site.get("_key_passphrase")
+        jumps = copy.deepcopy(site["jumps"])            # (with the passwords typed in the form)
         site = copy.deepcopy(self._persist(site))
         site["_password"] = password
         site["_proxy_password"] = proxy_password
+        site["_key_passphrase"] = passphrase
+        site["jumps"] = jumps
         self.close()
         self.window.open_session(site)
 
@@ -550,10 +767,12 @@ class SiteDialog(Adw.Dialog):
         self.auth_row.set_visible(ssh)
         auth = AUTH_MODES[self.auth_row.get_selected()]
         self.key_row.set_visible(ssh and auth in ("auto", "key"))
+        self.passphrase_row.set_visible(ssh and auth in ("auto", "key"))
+        self.save_pw_row.set_visible(not ssh or auth != "agent")
         self.compression_row.set_visible(ssh)
         self.passive_row.set_visible(proto == "ftp")
         self.password_row.set_visible(not ssh or auth in ("auto", "password"))
-        self.jump_expander.set_visible(ssh)
+        self.jumps_group.set_visible(ssh)
 
     def _on_proxy_type_changed(self, *_a):
         kind = PROXY_TYPES[self.proxy_type_row.get_selected()]
@@ -573,32 +792,126 @@ class SiteDialog(Adw.Dialog):
             text = f"{label} · {host}:{int(self.proxy_port_row.get_value())}" if host else f"{label}: no host yet"
         self.proxy_expander.set_subtitle(GLib.markup_escape_text(text))
 
-    def _update_jump_summary(self):
-        hops = [h.strip() for h in self.jump_row.get_text().split(",") if h.strip()]
-        self.jump_expander.set_subtitle(GLib.markup_escape_text(
-            "Through " + " → ".join(hops) if hops else "None: connect directly"))
+    # ------------------------------------------------------------------ jump hosts
+    def _upgrade_jump_hosts(self, site: dict, new: bool) -> dict:
+        """A site of an older version lists its jump hosts in ``jump_hosts``
+        (names of saved sites, or user@host:port logging in like the site),
+        and its proxy carries the connection to the first of them: shown
+        (and saved) as jump hosts with settings of their own."""
+        if site.get("jumps") or not (site.get("jump_hosts") or "").strip() \
+                or site.get("protocol") not in SSH_PROTOCOLS:
+            return site
+        site = copy.deepcopy(site)
+        if site.get("_proxy_password") is None and site.get("proxy_user") and not new:
+            site["_proxy_password"] = secrets.lookup(proxy_secret_id(site["id"]))
+        try:
+            hops = jump_hops(site, self.store.sites)
+        except Exception:  # noqa: BLE001 - a broken old list (a circle, …): keep what can be read
+            hops = []
+            for spec in (p.strip() for p in site["jump_hosts"].split(",")):
+                user, host, port = parse_host_spec(spec)
+                if host:
+                    hops.append({"host": host, "port": port or 22, "user": user,
+                                 "auth": site.get("auth"), "key_file": site.get("key_file")})
+            if hops:
+                hops[0].update({k: site.get(k) for k in ("proxy_type", "proxy_host", "proxy_port",
+                                                         "proxy_user", "_proxy_password")})
+        site["jumps"] = []
+        for hop in hops:
+            values = {k: hop.get(k) for k in ("host", "port", "user", "auth", "key_file", "proxy_type",
+                                              "proxy_host", "proxy_port", "proxy_user")
+                      if hop.get(k) is not None}
+            values["save_password"] = bool(hop.get("save_password", True))
+            site["jumps"].append(new_jump(**values, _password=hop.get("_password"),
+                                          _proxy_password=hop.get("_proxy_password")))
+        if hops:
+            site.update(proxy_type="none", proxy_host="", proxy_user="", _proxy_password=None)
+        site["jump_hosts"] = ""
+        return site
+
+    def _load_jumps(self, site: dict, new: bool):
+        for row in self.jump_rows:
+            self.jumps_group.remove(row)
+        self.jump_rows = []
+        for hop in site.get("jumps") or []:
+            password = hop.get("_password") or ""
+            proxy_password = hop.get("_proxy_password") or ""
+            passphrase = hop.get("_key_passphrase") or ""
+            if not new and site.get("id"):
+                if not password and hop.get("save_password"):
+                    password = secrets.lookup(jump_secret_id(site["id"], hop["id"])) or ""
+                if not proxy_password and hop.get("proxy_user"):
+                    proxy_password = secrets.lookup(jump_secret_id(site["id"], hop["id"], proxy=True)) or ""
+                if not passphrase and hop.get("save_password") and hop.get("key_file"):
+                    passphrase = secrets.lookup(jump_secret_id(site["id"], hop["id"], key=True)) or ""
+            self.add_jump(hop, password, proxy_password, passphrase)
+
+    def add_jump(self, hop: dict | None = None, password="", proxy_password="", passphrase="",
+                 expand=False) -> JumpHostRow:
+        row = JumpHostRow(self)
+        if hop is not None:
+            row.load(hop, password, proxy_password, passphrase)
+        self.jump_rows.append(row)
+        self.jumps_group.add(row)
+        self._update_jump_rows()
+        if expand:
+            row.set_expanded(True)
+            GLib.idle_add(lambda: (row.host_row.grab_focus(), False)[1])
+        return row
+
+    def remove_jump(self, row: JumpHostRow):
+        if row in self.jump_rows:
+            self.jump_rows.remove(row)
+            self.jumps_group.remove(row)
+            self._update_jump_rows()
+
+    def move_jump(self, row: JumpHostRow, step: int):
+        n = self.jump_rows.index(row)
+        m = max(0, min(len(self.jump_rows) - 1, n + step))
+        if m == n:
+            return
+        for r in self.jump_rows:
+            self.jumps_group.remove(r)
+        self.jump_rows.insert(m, self.jump_rows.pop(n))
+        for r in self.jump_rows:
+            self.jumps_group.add(r)
+        self._update_jump_rows()
+
+    def _update_jump_rows(self):
+        self.no_jumps_row.set_visible(not self.jump_rows)
+        for n, row in enumerate(self.jump_rows):
+            row.set_position(n, len(self.jump_rows))
 
     def _fill_jump_menu(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         own = self.current.get("id") if self.current else None
         candidates = [s for s in self.store.sorted()
-                      if s.get("protocol") in SSH_PROTOCOLS and s.get("id") != own and s.get("name")]
+                      if s.get("protocol") in SSH_PROTOCOLS and s.get("id") != own]
         if not candidates:
             box.append(Gtk.Label(label="No saved SFTP/SCP sites yet", margin_top=6, margin_bottom=6,
                                  margin_start=10, margin_end=10, css_classes=["dim-label"]))
+        else:
+            box.append(Gtk.Label(label="Add a copy of a saved site", xalign=0, margin_top=4, margin_bottom=4,
+                                 margin_start=10, margin_end=10, css_classes=["dim-label", "caption"]))
         for site in candidates:
-            button = Gtk.Button(label=site["name"], tooltip_text=site_subtitle(site))
+            button = Gtk.Button(label=site_title(site), tooltip_text=site_subtitle(site))
             button.add_css_class("flat")
             button.get_child().set_xalign(0)
-            button.connect("clicked", lambda _b, name=site["name"]: self._add_jump(name))
+            button.connect("clicked", lambda _b, site=site: self._add_jump_from_site(site))
             box.append(button)
         self.jump_popover.set_child(box)
 
-    def _add_jump(self, name):
+    def _add_jump_from_site(self, site: dict):
+        """A jump host that logs in like the saved site (a copy of its settings)."""
         self.jump_popover.popdown()
-        hops = [h.strip() for h in self.jump_row.get_text().split(",") if h.strip()]
-        hops.append(name)
-        self.jump_row.set_text(", ".join(hops))
+        hop = new_jump(**{k: site.get(k) for k in ("host", "port", "user", "auth", "key_file", "save_password",
+                                                    "proxy_type", "proxy_host", "proxy_port", "proxy_user")
+                          if site.get(k) is not None})
+        password = secrets.lookup(site["id"]) if site.get("save_password") else None
+        proxy_password = secrets.lookup(proxy_secret_id(site["id"])) if site.get("proxy_user") else None
+        passphrase = secrets.lookup(key_secret_id(site["id"])) \
+            if site.get("save_password") and site.get("key_file") else None
+        self.add_jump(hop, password or "", proxy_password or "", passphrase or "", expand=True)
 
     def _update_title(self):
         name = self.name_row.get_text().strip()

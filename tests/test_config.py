@@ -101,11 +101,14 @@ TunnelHostName=bastion.example.com
 """
     sites, warnings = winscp_import.parse_text(ini)
     inner, web, ftp = sites
-    assert (inner["proxy_type"], inner["proxy_host"], inner["proxy_port"], inner["proxy_user"]) == \
+    # WinSCP's proxy carries the connection to the tunnel's host: it goes to the jump host
+    [hop] = inner["jumps"]
+    assert (hop["host"], hop["port"], hop["user"]) == ("bastion.example.com", 2200, "jumper")
+    assert (hop["proxy_type"], hop["proxy_host"], hop["proxy_port"], hop["proxy_user"]) == \
         ("socks5", "socks.example.com", 9050, "proxyme")
-    assert inner["jump_hosts"] == "jumper@bastion.example.com:2200"
+    assert inner.get("proxy_type", "none") == "none" and not inner.get("jump_hosts")
     assert (web["proxy_type"], web["proxy_port"]) == ("http", 8080)
-    assert ftp.get("proxy_type", "none") == "none" and not ftp.get("jump_hosts")
+    assert ftp.get("proxy_type", "none") == "none" and not ftp.get("jumps")
     assert any("proxy password" in w for w in warnings)
     assert any("Telnet" in w for w in warnings) and any("SFTP and SCP sites only" in w for w in warnings)
 

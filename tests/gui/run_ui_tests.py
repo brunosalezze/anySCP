@@ -134,7 +134,8 @@ def proxy_server(d):
 def params(d, sha, sshd, native, pointer, slow, drop_target_cmd, only=None):
     return {"only": only,
         "ssh": {"host": "127.0.0.1", "port": sshd.port, "user": os.environ.get("USER", ""),
-                "key": native(sshd.dir / "client")},
+                "key": native(sshd.dir / "client"), "key_enc": native(sshd.dir / "client_enc"),
+                "key_passphrase": sshd.PASSPHRASE},
         "remote_dir": str(d["remote"]), "local_dir": native(d["local"]), "ro_dir": native(d["readonly"]),
         "ssh_home": os.path.expanduser("~"),          # (the test server's user: its SFTP start folder)
         "sha": sha, "docs": ["a.txt", "b.txt"], "out": native(d["out"] / "result.json"),

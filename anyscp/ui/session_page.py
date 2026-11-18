@@ -21,7 +21,8 @@ from ..session import LocalEndpoint, Session, SessionEndpoint
 from ..transfer import DONE, FAILED, TransferJob
 from ..utils import looks_like_text
 from .file_pane import FilePane, LocalBackend
-from .prompts import UIPrompter, alert, ask_text_dialog, make_spinner, show_error
+from .connect_progress import progress_clamp
+from .prompts import UIPrompter, alert, ask_text_dialog, show_error
 
 FKEYS = [
     ("F2", "Rename", "rename"),
@@ -89,9 +90,10 @@ class SessionPage(Gtk.Box):
         page = Adw.StatusPage(title=f"Connecting to {self.title}",
                               description=site_subtitle(self.site))
         page.set_paintable(None)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, halign=Gtk.Align.CENTER)
-        spinner = make_spinner(width_request=48, height_request=48)
-        box.append(spinner)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        # each machine of the way (jump hosts, then the server), and what happened
+        clamp, self.connect_progress = progress_clamp(self.session)
+        box.append(clamp)
         cancel = Gtk.Button(label="Cancel", halign=Gtk.Align.CENTER)
         cancel.add_css_class("pill")
         cancel.connect("clicked", lambda *_a: self.window.close_page(self, force=True))
@@ -114,7 +116,11 @@ class SessionPage(Gtk.Box):
         log.connect("clicked", lambda *_a: self.show_log())
         for b in (retry, edit, log):
             box.append(b)
-        self.error_page.set_child(box)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        outer.append(box)
+        clamp, self.error_progress = progress_clamp(self.session)    # where it stopped
+        outer.append(clamp)
+        self.error_page.set_child(outer)
         self.stack.add_named(self.error_page, "error")
 
     def connect_session(self):
