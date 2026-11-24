@@ -53,12 +53,10 @@ Upload both .msix files. Device family: Windows 10/11 Desktop.
 - Passwords in the Windows Credential Manager
 - Light and dark appearance
 
-**What's new in this version** (1.1.0; from CHANGELOG.md)
+**What's new in this version** (1.1.1; from CHANGELOG.md)
 
-> - Jump hosts with their own settings: user, password, private key and passphrase, proxy.
-> - Saved passwords and key passphrases for every machine in the chain, used automatically.
-> - See each machine of the connection, from top to bottom, while connecting.
-> - Double-click a saved site to log in; click empty space to clear the selection.
+> - The Sites dialog is now a window of its own: it can be resized and maximized, and it
+>   opens at the size it had last time.
 
 **Keywords**: sftp, scp, ftp, webdav, ssh, file transfer, file manager
 

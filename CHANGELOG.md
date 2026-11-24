@@ -2,7 +2,7 @@
 
 All notable changes to anySCP. Versions follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 1.1.1 — 2026-11-24
 
 ### Changed
 

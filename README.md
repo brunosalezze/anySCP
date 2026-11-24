@@ -59,6 +59,8 @@ import your saved WinSCP sites.
 **Security and sites**
 - Site manager with folders, colors, notes and per-site settings, plus **Quick Connect** with URLs such as `sftp://user@host:port/path`.
   **Log In** saves the site first, so a new site is never lost
+- The Sites dialog is a window of its own: resize and maximize it as you like; it opens at the
+  size it had last time. Escape still closes it
 - A site's remote directory can be relative to your home folder on the server (`www` or `~/www`). If it
   can't be opened (renamed, mistyped), anySCP opens your home folder instead and says why
 - Passwords are stored in the **GNOME Keyring** (libsecret), never in plain text
@@ -89,11 +91,11 @@ version: [CHANGELOG.md](CHANGELOG.md).
 
 | Platform | File | How to run |
 |---|---|---|
-| Linux (x86-64, glibc ≥ 2.28) | `anySCP-1.1.0-x86_64.AppImage` | `chmod +x anySCP-*.AppImage && ./anySCP-*.AppImage` |
-| Linux (arm64: Raspberry Pi 4/5 with a 64-bit OS, ARM servers; glibc ≥ 2.28) | `anySCP-1.1.0-aarch64.AppImage` | the same |
-| Windows 10/11 (x64) | `anySCP-1.1.0-windows-x64.exe` | Double-click. The first start takes a little longer while it unpacks itself. |
-| Windows 11 on ARM (Snapdragon PCs, Surface Pro X/11) | `anySCP-1.1.0-windows-arm64.exe` | the same |
-| macOS 11 or newer on Apple Silicon (M1 and later), **experimental** | `anySCP-1.1.0-macos-arm64.dmg` | Open it and drag anySCP to Applications; the first start needs your approval, see below. |
+| Linux (x86-64, glibc ≥ 2.28) | `anySCP-1.1.1-x86_64.AppImage` | `chmod +x anySCP-*.AppImage && ./anySCP-*.AppImage` |
+| Linux (arm64: Raspberry Pi 4/5 with a 64-bit OS, ARM servers; glibc ≥ 2.28) | `anySCP-1.1.1-aarch64.AppImage` | the same |
+| Windows 10/11 (x64) | `anySCP-1.1.1-windows-x64.exe` | Double-click. The first start takes a little longer while it unpacks itself. |
+| Windows 11 on ARM (Snapdragon PCs, Surface Pro X/11) | `anySCP-1.1.1-windows-arm64.exe` | the same |
+| macOS 11 or newer on Apple Silicon (M1 and later), **experimental** | `anySCP-1.1.1-macos-arm64.dmg` | Open it and drag anySCP to Applications; the first start needs your approval, see below. |
 
 Each one includes Python, GTK 4.24, libadwaita 1.10 and every other dependency.
 (Windows on ARM can also run the x64 build, emulated; the arm64 one runs natively and is faster.)
