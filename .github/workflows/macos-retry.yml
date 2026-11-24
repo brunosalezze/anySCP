@@ -13,12 +13,18 @@
 # one that no runner ever took.  A run is re-run while it has made fewer than
 # four attempts, one run at a time (the macOS runs share a concurrency group,
 # and a re-run would cancel a newer one), and for at most seventy minutes.
+# It looks over the recent runs whenever a macOS run ends, once a day, when
+# this workflow changes and by hand.
 name: macOS retry
 
 on:
   workflow_run:
     workflows: [macOS]
     types: [completed]
+  schedule:
+    - cron: "43 6 * * *"        # once a day: another chance for a run whose retry also starved
+  push:
+    paths: [".github/workflows/macos-retry.yml"]
   workflow_dispatch:            # by hand: look over the recent macOS runs again
 
 permissions:
@@ -30,10 +36,6 @@ concurrency:                    # one watcher at a time
 
 jobs:
   retry:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'failure' ||
-      github.event.workflow_run.conclusion == 'cancelled'
     runs-on: ubuntu-24.04
     timeout-minutes: 80
     permissions:
@@ -101,6 +103,8 @@ jobs:
               way of a newer one (they share the workflow's concurrency group)."""
               if run["conclusion"] not in ("failure", "cancelled"):
                   return f"it ended as {run['conclusion']}"
+              if run["created_at"] < time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 14 * 86400)):
+                  return "it is more than two weeks old"
               if run["run_attempt"] >= MAX_ATTEMPTS:
                   return f"it has already made {run['run_attempt']} attempts"
               if not starved(run["id"]):
