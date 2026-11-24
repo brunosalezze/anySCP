@@ -3,7 +3,8 @@
 # GitHub's Macs, not yet tried by a person.  A workflow of its own, as GitHub's
 # Apple Silicon runners are sometimes not available for a long while, which
 # must not turn the main build red: it runs when the macOS packaging changes,
-# every Monday, for version tags and by hand.
+# every Monday, for version tags and by hand.  A run that goes red only because
+# no runner was free is re-run by macos-retry.yml.
 name: macOS
 
 on:
