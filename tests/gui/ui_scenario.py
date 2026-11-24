@@ -584,6 +584,24 @@ def test_proxy_and_jump_site(app):
     wait(0.3)
 
 
+def resize_window(window, width, height):
+    """Resize a shown window as the user would: on Windows through the system (GTK keeps
+    the size it has there), elsewhere by asking GTK."""
+    if not compat.IS_WINDOWS:
+        window.set_default_size(width, height)
+        return
+    import ctypes
+    gi.require_version("GdkWin32", "4.0")
+    from gi.repository import GdkWin32
+    user32 = ctypes.windll.user32
+    user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p] + [ctypes.c_int] * 4 + [ctypes.c_uint]
+    surface = window.get_surface()
+    scale = surface.get_scale()
+    hwnd = GdkWin32.Win32Surface.get_handle(surface)
+    user32.SetWindowPos(hwnd, None, 0, 0, int(width * scale), int(height * scale),
+                        0x0002 | 0x0004 | 0x0010)              # SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+
+
 def test_double_click_logs_in(app, screen, mouse, label):
     """In the Sites dialog, a double click on a saved site logs in to it."""
     from anyscp.config import new_site
@@ -596,6 +614,23 @@ def test_double_click_logs_in(app, screen, mouse, label):
     dlg = SiteDialog(win, select_new=True)
     dlg.present(win)
     wait(0.8)
+    step(f"{label}: the Sites window can be resized", isinstance(dlg, Gtk.Window) and dlg.get_resizable()
+         and dlg.get_transient_for() is win and dlg.get_modal())
+    before = (dlg.get_width(), dlg.get_height())
+    resize_window(dlg, 760, 560)
+    spin(lambda: (dlg.get_width(), dlg.get_height()) != before, 3)
+    after = (dlg.get_width(), dlg.get_height())
+    step(f"{label}: ... to a size of the user's choosing",     # (less the window's frame, if drawn by GTK)
+         all(0 <= want - got <= 80 for want, got in zip((760, 560), after)), (before, after))
+    kept = dlg.get_default_size()
+    dlg.close()
+    spin(lambda: not dlg.get_mapped(), 3)
+    dlg = SiteDialog(win, select_new=True)
+    dlg.present(win)
+    wait(0.8)
+    step(f"{label}: ... which it keeps the next time", kept != before and dlg.get_default_size() == kept
+         and (win.settings["sites_width"], win.settings["sites_height"]) == kept,
+         (kept, dlg.get_default_size(), win.settings["sites_width"], win.settings["sites_height"]))
     row = next(r for r in all_widgets(dlg.listbox) if getattr(r, "site", None) and r.site["id"] == site["id"])
     pages = list(win.pages())
     mouse.move(*screen(row, 0.5, 0.5))
@@ -869,8 +904,14 @@ def test_pointer(app, page):
     sx, sy = win.get_surface_transform()
 
     def screen(widget, fx=0.5, fy=0.5):
-        x, y = point_in(widget, win, fx, fy)
-        return ox + sx + x, oy + sy + y
+        root = widget.get_root()                       # the main window, or the Sites window
+        if root is win:
+            x, y = point_in(widget, win, fx, fy)
+            return ox + sx + x, oy + sy + y
+        rx, ry = pointer.origin(GdkX11.X11Surface.get_xid(root.get_surface()))
+        tx, ty = root.get_surface_transform()
+        x, y = point_in(widget, root, fx, fy)
+        return rx + tx + x, ry + ty + y
 
     def drag(start, stops, hold=0.4):
         pointer.move(*start)
@@ -1249,9 +1290,12 @@ def test_pointer_windows(app, page):
     sx, sy = win.get_surface_transform()
 
     def screen(widget, fx=0.5, fy=0.5):
-        x, y = point_in(widget, win, fx, fy)
-        pt = wintypes.POINT(int((x + sx) * scale), int((y + sy) * scale))
-        user32.ClientToScreen(hwnd, ctypes.byref(pt))
+        root = widget.get_root()                       # the main window, or the Sites window
+        rsx, rsy = (sx, sy) if root is win else root.get_surface_transform()
+        handle = hwnd if root is win else GdkWin32.Win32Surface.get_handle(root.get_surface())
+        x, y = point_in(widget, root, fx, fy)
+        pt = wintypes.POINT(int((x + rsx) * scale), int((y + rsy) * scale))
+        user32.ClientToScreen(handle, ctypes.byref(pt))
         return pt.x, pt.y
 
     def drag(start, stops, hold=0.4):

@@ -449,6 +449,8 @@ DEFAULT_SETTINGS = {
     "window_width": 1280,
     "window_height": 800,
     "window_maximized": False,
+    "sites_width": 920,
+    "sites_height": 660,
     "pane_position": 0,
     "columns_local": None,
     "columns_remote": None,

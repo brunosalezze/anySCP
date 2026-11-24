@@ -209,10 +209,22 @@ class JumpHostRow(Adw.ExpanderRow):
         self.set_subtitle(GLib.markup_escape_text(" · ".join(parts)))
 
 
-class SiteDialog(Adw.Dialog):
+class SiteDialog(Adw.Window):
+    """The Sites window: a modal window of its own, so it can be resized and maximized.
+    Its last size is remembered for the next time."""
+
     def __init__(self, window, site: dict | None = None, *, select_new=False):
-        super().__init__(title="Sites", content_width=920, content_height=660)
+        settings = window.settings
+        width = max(360, int(settings["sites_width"] or 920))
+        height = max(420, int(settings["sites_height"] or 660))
+        super().__init__(title="Sites", transient_for=window, modal=True,
+                         default_width=width, default_height=height, destroy_with_parent=True)
         self.set_size_request(360, 420)
+        self.connect("close-request", self._remember_size)
+        keys = Gtk.ShortcutController()
+        keys.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("Escape"),
+                                       action=Gtk.CallbackAction.new(lambda *_a: self.close() or True)))
+        self.add_controller(keys)
         self.window = window
         self.store = window.sites
         self.current: dict = new_site()
@@ -228,7 +240,8 @@ class SiteDialog(Adw.Dialog):
         breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 640sp"))
         breakpoint.add_setter(split, "collapsed", True)
         self.add_breakpoint(breakpoint)
-        self.set_child(split)
+        self.toasts = Adw.ToastOverlay(child=split)
+        self.set_content(self.toasts)
 
         self._fill_sites()
         if site is not None and self.store.get(site.get("id", "")) is not None:
@@ -240,6 +253,21 @@ class SiteDialog(Adw.Dialog):
             self._select_site(first["id"])
         else:
             self.listbox.select_row(self.listbox.get_row_at_index(0))
+
+    def present(self, _parent=None):
+        """Like Adw.Dialog.present(parent): the parent is the main window given at creation."""
+        super().present()
+
+    def _remember_size(self, *_a):
+        if not self.is_maximized():
+            width, height = self.get_default_size()
+            if width > 0 and height > 0:
+                self.window.settings["sites_width"] = width
+                self.window.settings["sites_height"] = height
+        return False
+
+    def toast(self, text: str, timeout: int = 3):
+        self.toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(str(text)), timeout=timeout))
 
     # ------------------------------------------------------------------ sidebar
     def _build_sidebar(self):
@@ -677,12 +705,12 @@ class SiteDialog(Adw.Dialog):
     def _save(self):
         site = self.read_form()
         if not site["host"]:
-            self.window.toast("Enter a host name first")
+            self.toast("Enter a host name first")
             self.host_row.grab_focus()
             return
         saved = self._persist(site)
         self._fill_sites(saved["id"])
-        self.window.toast(f"Saved “{saved['name']}”")
+        self.toast(f"Saved “{saved['name']}”")
 
     def _login(self):
         site = self.read_form()
@@ -946,6 +974,6 @@ class SiteDialog(Adw.Dialog):
             if f is not None and f.get_path():
                 setter(f.get_path())
         if folder:
-            dialog.select_folder(self.window, None, done)
+            dialog.select_folder(self, None, done)
         else:
-            dialog.open(self.window, None, done)
+            dialog.open(self, None, done)

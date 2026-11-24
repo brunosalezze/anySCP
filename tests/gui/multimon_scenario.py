@@ -341,6 +341,7 @@ def app_hwnd(win):
 
 def to_screen(win, widget, fx=0.5, fy=0.5):
     """Physical screen point of a spot in a widget."""
+    win = widget.get_root() or win                     # the main window, or the Sites window
     ok, pt = widget.compute_point(win, Graphene.Point().init(widget.get_width() * fx, widget.get_height() * fy))
     assert ok
     surface = win.get_surface()

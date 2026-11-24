@@ -2,6 +2,13 @@
 
 All notable changes to anySCP. Versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- **The Sites dialog is now a window of its own** that can be resized and maximized. It
+  opens at the size it had last time. Escape still closes it.
+
 ## 1.1.0 — 2026-11-18
 
 ### Added
